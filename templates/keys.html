@@ -1,0 +1,461 @@
+{% extends 'base.html' %}
+
+{% block title %}Управление SSH-ключами - VPS Manager{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2">Управление SSH-ключами</h1>
+        <div>
+            <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#generateKeyModal">
+                <i class="bi bi-magic me-1"></i> Сгенерировать ключ
+            </button>
+            <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#uploadKeyModal">
+                <i class="bi bi-upload me-1"></i> Загрузить ключ
+            </button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Название</th>
+                            <th>Тип</th>
+                            <th>Fingerprint (MD5)</th>
+                            <th>Дата создания</th>
+                            <th class="text-end">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for key in keys %}
+                        <tr id="key-{{ key.id }}">
+                            <td>{{ key.name }}</td>
+                            <td><span class="badge bg-info text-dark">{{ key.key_type.upper() }}</span></td>
+                            <td><code>{{ key.fingerprint }}</code><br><textarea class="form-control form-control-sm mt-1" rows="2" readonly>{{ key.public_key }}</textarea></td>
+                            <td>{{ key.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-secondary me-1"><i class="bi bi-eye"></i></button>
+                                <button class="btn btn-sm btn-outline-primary me-1 deploy-btn" 
+                                        data-key-id="{{ key.id }}" 
+                                        data-key-name="{{ key.name }}">
+                                    <i class="bi bi-send"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning me-1 revoke-all-btn" 
+                                        data-key-id="{{ key.id }}" 
+                                        data-key-name="{{ key.name }}"
+                                        title="Отозвать ключ со всех серверов">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger delete-key-btn" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#deleteKeyModal"
+                                        data-id="{{ key.id }}"
+                                        data-name="{{ key.name }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center py-4">SSH-ключи еще не добавлены.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Generate Key Modal -->
+<div class="modal fade" id="generateKeyModal" tabindex="-1" aria-labelledby="generateKeyModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ url_for('generate_key') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="generateKeyModalLabel">Сгенерировать новый SSH-ключ</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {{ generate_form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ generate_form.name.label(class="form-label") }}
+                        {{ generate_form.name(class="form-control") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ generate_form.key_type.label(class="form-label") }}
+                        {{ generate_form.key_type(class="form-select") }}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    {{ generate_form.submit(class="btn btn-primary") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<!-- Delete Key Confirmation Modal -->
+<div class="modal fade" id="deleteKeyModal" tabindex="-1" aria-labelledby="deleteKeyModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteKeyModalLabel">Подтверждение удаления</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Вы уверены, что хотите удалить ключ <strong id="keyNameToDelete"></strong>?
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteKeyBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для развёртывания ключа -->
+<div class="modal fade" id="deployKeyModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Развернуть ключ на сервер</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Ключ: <strong id="deployKeyName"></strong></p>
+        <div class="mb-3">
+          <label class="form-label">Выберите сервер</label>
+          <select class="form-select" id="deployServerSelect" required>
+            <option value="">-- Выберите сервер --</option>
+            {% for server in servers %}
+            <option value="{{ server.id }}">{{ server.name }} ({{ server.ip_address }})</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-success" id="deployBtn">
+          <i class="bi bi-send me-2"></i>Развернуть
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модальное окно для отзыва ключа со всех серверов -->
+<div class="modal fade" id="revokeAllKeyModal" tabindex="-1" aria-labelledby="revokeAllKeyModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-warning">
+        <h5 class="modal-title" id="revokeAllKeyModalLabel">
+          <i class="bi bi-exclamation-triangle me-2"></i>Отозвать ключ со всех серверов
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p>Вы собираетесь отозвать ключ <strong id="revokeAllKeyName"></strong> со всех серверов, где он развернут.</p>
+        <div class="alert alert-info">
+          <strong>Серверы, где развернут ключ:</strong>
+          <ul id="revokeAllServersList" class="mb-0 mt-2">
+            <!-- Список серверов будет заполнен JavaScript -->
+          </ul>
+        </div>
+        <div id="revokeAllProgress" style="display: none;">
+          <div class="progress mb-2">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="revokeAllProgressBar" role="progressbar" style="width: 0%"></div>
+          </div>
+          <small id="revokeAllProgressText" class="text-muted">Инициализация...</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="revokeAllCancelBtn">Отмена</button>
+        <button type="button" class="btn btn-danger" id="revokeAllConfirmBtn">
+          <i class="bi bi-exclamation-triangle me-2"></i>Отозвать везде
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentKeyId = null;
+  let deployModal = null;
+
+  // Инициализируем модальное окно после полной загрузки страницы
+  document.addEventListener('DOMContentLoaded', function () {
+    deployModal = new bootstrap.Modal(document.getElementById('deployKeyModal'));
+    
+    // Обработчик клика по кнопке развертывания
+    document.querySelectorAll('.deploy-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const keyId = this.getAttribute('data-key-id');
+        const keyName = this.getAttribute('data-key-name');
+        openDeployModal(keyId, keyName);
+      });
+    });
+  });
+
+  // Открыть модальное окно для развёртывания
+  function openDeployModal(keyId, keyName) {
+    currentKeyId = keyId;
+    document.getElementById('deployKeyName').textContent = keyName;
+    if (deployModal) {
+      deployModal.show();
+    }
+  }
+
+  // Развернуть ключ на сервер
+  async function deployKey() {
+    console.log('1. Начало выполнения deployKey()');
+    const serverId = document.getElementById('deployServerSelect').value;
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+    
+    if (!serverId) {
+      const errorMsg = 'Ошибка: не выбран сервер';
+      console.error(errorMsg);
+      alert('❌ ' + errorMsg);
+      return;
+    }
+
+    console.log('2. ID сервера:', serverId);
+    console.log('3. ID ключа:', currentKeyId);
+    
+    const btn = document.getElementById('deployBtn');
+    if (!btn) {
+      console.error('Ошибка: не найден элемент #deployBtn');
+      return;
+    }
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Развёртывание...';
+
+    try {
+      console.log('4. Отправка запроса на /keys/deploy');
+      const response = await fetch('/keys/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken || ''
+        },
+        body: JSON.stringify({
+          key_id: currentKeyId,
+          server_id: parseInt(serverId)
+        }),
+        credentials: 'same-origin'
+      });
+
+      console.log('5. Получен ответ:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('6. Ответ сервера:', data);
+
+      if (data.success) {
+        const successMsg = data.message || 'Ключ успешно развёрнут';
+        console.log('7. Успех:', successMsg);
+        alert('✅ ' + successMsg);
+        
+        if (deployModal) {
+          deployModal.hide();
+          // Дадим время модальному окну скрыться перед перезагрузкой
+          setTimeout(() => location.reload(), 500);
+        } else {
+          location.reload();
+        }
+      } else {
+        const errorMsg = data.message || 'Неизвестная ошибка';
+        console.error('7. Ошибка сервера:', errorMsg);
+        alert('❌ Ошибка: ' + errorMsg);
+      }
+    } catch (error) {
+      console.error('Ошибка при развёртывании ключа:', error);
+      alert(`❌ Ошибка: ${error.message || 'Не удалось выполнить запрос'}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-send me-2"></i>Развернуть';
+    }
+  }
+  // --- Обработка удаления ключа ---
+  const deleteKeyModal = document.getElementById('deleteKeyModal');
+  let keyIdToDelete = null;
+
+  deleteKeyModal.addEventListener('show.bs.modal', function (event) {
+    const button = event.relatedTarget;
+    keyIdToDelete = button.getAttribute('data-id');
+    const keyName = button.getAttribute('data-name');
+    const modalBody = deleteKeyModal.querySelector('#keyNameToDelete');
+    modalBody.textContent = keyName;
+  });
+
+  const confirmDeleteKeyBtn = document.getElementById('confirmDeleteKeyBtn');
+  confirmDeleteKeyBtn.addEventListener('click', async function() {
+    if (!keyIdToDelete) return;
+
+    if (!confirm(`Вы уверены, что хотите удалить ключ? Это действие необратимо.`)) {
+        return;
+    }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    try {
+      const response = await fetch(`/keys/delete/${keyIdToDelete}`, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrfToken
+        }
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert('✅ ' + data.message);
+        document.getElementById(`key-${keyIdToDelete}`).remove();
+        bootstrap.Modal.getInstance(deleteKeyModal).hide();
+      } else {
+        alert('❌ ' + data.message);
+      }
+    } catch (error) {
+      console.error('Ошибка при удалении ключа:', error);
+      alert('❌ Произошла ошибка при отправке запроса.');
+    }
+  });
+
+  // Подключаем deployKey к кнопке в модальном окне
+  const deployBtn = document.getElementById('deployBtn');
+  if (deployBtn) {
+      deployBtn.addEventListener('click', deployKey);
+  }
+
+  // --- Обработка отзыва ключа со всех серверов ---
+  let revokeAllKeyId = null;
+  let revokeAllModal = null;
+
+  document.addEventListener('DOMContentLoaded', function() {
+    revokeAllModal = new bootstrap.Modal(document.getElementById('revokeAllKeyModal'));
+    
+    // Обработчик клика по кнопке "Отозвать везде"
+    document.querySelectorAll('.revoke-all-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        revokeAllKeyId = this.getAttribute('data-key-id');
+        const keyName = this.getAttribute('data-key-name');
+        openRevokeAllModal(revokeAllKeyId, keyName);
+      });
+    });
+  });
+
+  function openRevokeAllModal(keyId, keyName) {
+    revokeAllKeyId = keyId;
+    document.getElementById('revokeAllKeyName').textContent = keyName;
+    
+    // Получаем список серверов где развернут ключ
+    fetchServersWithKey(keyId);
+    
+    if (revokeAllModal) {
+      revokeAllModal.show();
+    }
+  }
+
+  async function fetchServersWithKey(keyId) {
+    try {
+      const response = await fetch(`/api/key-servers/${keyId}`);
+      if (!response.ok) {
+        throw new Error('Ошибка при получении списка серверов');
+      }
+      
+      const data = await response.json();
+      const serversList = document.getElementById('revokeAllServersList');
+      serversList.innerHTML = '';
+      
+      if (data.servers && data.servers.length > 0) {
+        data.servers.forEach(server => {
+          const li = document.createElement('li');
+          li.textContent = `${server.name} (${server.ip_address})`;
+          serversList.appendChild(li);
+        });
+      } else {
+        serversList.innerHTML = '<li class="text-muted">Ключ не развернут ни на одном сервере</li>';
+      }
+    } catch (error) {
+      console.error('Ошибка при получении серверов:', error);
+      const serversList = document.getElementById('revokeAllServersList');
+      serversList.innerHTML = '<li class="text-danger">Ошибка при загрузке списка серверов</li>';
+    }
+  }
+
+  // Обработчик кнопки "Отозвать везде"
+  document.getElementById('revokeAllConfirmBtn').addEventListener('click', async function() {
+    if (!revokeAllKeyId) return;
+
+    const confirmBtn = this;
+    const cancelBtn = document.getElementById('revokeAllCancelBtn');
+    const progressDiv = document.getElementById('revokeAllProgress');
+    const progressBar = document.getElementById('revokeAllProgressBar');
+    const progressText = document.getElementById('revokeAllProgressText');
+
+    // Отключаем кнопки и показываем прогресс
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    progressDiv.style.display = 'block';
+
+    try {
+      const response = await fetch('/api/revoke-key-all', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+        },
+        body: JSON.stringify({
+          ssh_key_id: parseInt(revokeAllKeyId)
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Ошибка при отзыве ключа');
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Обновляем прогресс-бар
+        const percent = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 100;
+        progressBar.style.width = percent + '%';
+        progressText.textContent = `Завершено: ${data.completed}/${data.total}, Ошибок: ${data.failed}`;
+
+        // Показываем результат
+        setTimeout(() => {
+          alert(`✅ Ключ успешно отозван со всех серверов!\n\nВсего: ${data.total}\nУспешно: ${data.completed}\nОшибок: ${data.failed}`);
+          
+          if (revokeAllModal) {
+            revokeAllModal.hide();
+          }
+          
+          // Перезагружаем страницу через 1 сек
+          setTimeout(() => location.reload(), 1000);
+        }, 500);
+      } else {
+        throw new Error(data.message || 'Неизвестная ошибка');
+      }
+    } catch (error) {
+      console.error('Ошибка при отзыве ключа:', error);
+      alert(`❌ Ошибка: ${error.message || 'Не удалось отозвать ключ'}`);
+      
+      // Восстанавливаем кнопки
+      confirmBtn.disabled = false;
+      cancelBtn.disabled = false;
+      progressDiv.style.display = 'none';
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,21 @@
+# Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+click==8.1.7
+
+# Database & ORM
+Flask-SQLAlchemy==3.0.5
+SQLAlchemy==1.4.54
+Flask-Migrate==4.0.5
+
+# Authentication & Security
+Flask-Login==0.6.3
+Flask-WTF==1.2.1
+cryptography==42.0.0
+
+# SSH & Remote Operations
+paramiko==3.4.0
+requests==2.31.0
+
+# Configuration
+python-dotenv==1.0.0

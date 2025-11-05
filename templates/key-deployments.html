@@ -1,0 +1,399 @@
+{% extends 'base.html' %}
+
+{% block title %}Распределение ключей - VPS Manager{% endblock %}
+
+{% block content %}
+<!-- Модальное окно с диагностикой ошибки -->
+<div class="modal fade" id="revokeErrorModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle"></i> Ошибка при отзыве ключа
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Основная ошибка -->
+                <div class="alert alert-danger mb-3">
+                    <strong id="errorMessage"></strong>
+                </div>
+                
+                <!-- Проблема -->
+                <div class="card mb-3">
+                    <div class="card-header bg-light">
+                        <i class="bi bi-question-circle"></i> <strong>Что произошло?</strong>
+                    </div>
+                    <div class="card-body" id="problemDiv">
+                        <!-- Заполняется JS -->
+                    </div>
+                </div>
+                
+                <!-- Возможные причины -->
+                <div class="card mb-3">
+                    <div class="card-header bg-light">
+                        <i class="bi bi-search"></i> <strong>Возможные причины:</strong>
+                    </div>
+                    <div class="card-body">
+                        <ul id="reasonsList" style="margin: 0;">
+                            <!-- Заполняется JS -->
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- Рекомендации -->
+                <div class="card mb-3">
+                    <div class="card-header bg-light">
+                        <i class="bi bi-lightbulb"></i> <strong>Что делать?</strong>
+                    </div>
+                    <div class="card-body" id="solutionDiv">
+                        <!-- Заполняется JS -->
+                    </div>
+                </div>
+                
+                <!-- Информация о сервере -->
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <i class="bi bi-info-circle"></i> <strong>Информация о сервере:</strong>
+                    </div>
+                    <div class="card-body" id="serverInfoDiv" style="font-size: 12px;">
+                        <!-- Заполняется JS -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x"></i> Закрыть
+                </button>
+                <button type="button" class="btn btn-primary" id="retryRevokeBtn">
+                    <i class="bi bi-arrow-repeat"></i> Попробовать снова
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h2 class="mb-4">Распределение SSH-ключей</h2>
+
+<!-- ФИЛЬТРЫ -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <label>Фильтр по ключу:</label>
+        <select id="keyFilter" class="form-select">
+            <option value="">Все ключи</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label>Фильтр по серверу:</label>
+        <select id="serverFilter" class="form-select">
+            <option value="">Все серверы</option>
+        </select>
+    </div>
+    <div class="col-md-3">
+        <label>Статус:</label>
+        <select id="statusFilter" class="form-select">
+            <option value="">Все</option>
+            <option value="active">Активные</option>
+            <option value="revoked">Отозванные</option>
+        </select>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+        <button onclick="applyFilters()" class="btn btn-primary w-100">
+            <i class="bi bi-funnel"></i> Применить
+        </button>
+    </div>
+</div>
+
+<!-- ТАБЛИЦА -->
+<div class="table-responsive">
+    <table class="table table-striped table-hover">
+        <thead class="table-light">
+            <tr>
+                <th>Название ключа</th>
+                <th>Тип</th>
+                <th>Сервер</th>
+                <th>IP Адрес</th>
+                <th>Дата развёртывания</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="deploymentsTable">
+            {% for deployment in deployments %}
+            <tr>
+                <td>{{ deployment.ssh_key.name|escape }}</td>
+                <td>{{ deployment.ssh_key.key_type|escape }}</td>
+                <td>{{ deployment.server.name|escape }}</td>
+                <td>{{ deployment.server.ip_address|escape }}</td>
+                <td>{{ deployment.deployed_at.strftime('%Y-%m-%d %H:%M:%S') if deployment.deployed_at else 'N/A' }}</td>
+                <td>
+                    {% if deployment.revoked_at %}
+                        <span class="badge bg-danger">Отозван</span>
+                    {% else %}
+                        <span class="badge bg-success">Активен</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if not deployment.revoked_at %}
+                        <button class="btn btn-sm btn-danger" data-deployment-id="{{ deployment.id }}" onclick="revokeKeyFromButton(this)">
+                            <i class="bi bi-trash"></i> Отозвать
+                        </button>
+                    {% else %}
+                        <span class="text-muted">Отозван</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if not deployments %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> Нет развёрнутых ключей.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentDeploymentId = null;
+
+/**
+ * Отзывает SSH ключ с одного сервера из кнопки.
+ * @param {HTMLElement} button - Кнопка с data-атрибутами
+ */
+function revokeKeyFromButton(button) {
+    const deploymentId = button.getAttribute('data-deployment-id');
+    revokeKey(deploymentId);
+}
+
+/**
+ * Отзывает SSH ключ с одного сервера.
+ * @param {number} deploymentId - ID развертывания ключа
+ */
+function revokeKey(deploymentId) {
+    if (!confirm('Вы уверены что хотите отозвать доступ? Ключ будет удален с сервера.')) {
+        return;
+    }
+    
+    currentDeploymentId = deploymentId;
+    
+    // Таймаут на fetch запрос: 30 секунд
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+    fetch('/api/revoke-key', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            deployment_id: deploymentId
+        }),
+        signal: controller.signal
+    })
+    .then(response => {
+        clearTimeout(timeoutId);
+        if (response.status === 500) {
+            // Сервер может вернуть 500 но с полезным сообщением
+            return response.json();
+        }
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            alert('✅ ' + data.message);
+            location.reload();
+        } else {
+            // Если есть детали ошибки - показать модальное окно
+            if (data.details) {
+                showRevokeError(data);
+            } else {
+                alert('⚠️ ' + (data.message || 'Неизвестная ошибка'));
+            }
+        }
+    })
+    .catch(error => {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+            alert('❌ Ошибка: Таймаут при отзыве ключа (превышено 30 секунд)');
+        } else {
+            alert('❌ Ошибка отзыва ключа: ' + (error.message || error));
+        }
+        console.error('Ошибка при отзыве ключа:', error);
+    });
+}
+
+/**
+ * Показывает модальное окно с детальной диагностикой ошибки
+ * @param {Object} data - Данные ошибки от сервера
+ */
+function showRevokeError(data) {
+    const modal = new bootstrap.Modal(document.getElementById('revokeErrorModal'));
+    
+    // Заполнить основное сообщение об ошибке
+    document.getElementById('errorMessage').textContent = data.message;
+    
+    // Заполнить описание проблемы
+    document.getElementById('problemDiv').innerHTML = '<p>' + (data.details.problem || 'Неизвестная проблема') + '</p>';
+    
+    // Заполнить список причин
+    const reasonsList = document.getElementById('reasonsList');
+    const reasons = data.details.reasons || [];
+    reasonsList.innerHTML = reasons
+        .map(r => '<li>' + escapeHtml(r) + '</li>')
+        .join('');
+    
+    // Заполнить рекомендации
+    document.getElementById('solutionDiv').innerHTML = '<p>' + (data.details.solution || 'Проверьте логи сервера') + '</p>';
+    
+    // Заполнить информацию о сервере
+    if (data.server_info) {
+        const info = data.server_info;
+        document.getElementById('serverInfoDiv').innerHTML = `
+            <div class="mb-2"><strong>Сервер:</strong> ${escapeHtml(info.name)}</div>
+            <div class="mb-2"><code>Адрес: ${escapeHtml(info.ip)}:${info.port}</code></div>
+            <div><code>Пользователь: ${escapeHtml(info.username)}</code></div>
+        `;
+    }
+    
+    modal.show();
+}
+
+/**
+ * Экранирует HTML символы для безопасного вывода
+ * @param {string} text - Текст для экранирования
+ * @returns {string} Экранированный текст
+ */
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// Инициализация обработчика кнопки "Попробовать снова"
+document.addEventListener('DOMContentLoaded', function() {
+    const retryBtn = document.getElementById('retryRevokeBtn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', function() {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('revokeErrorModal'));
+            if (modal) {
+                modal.hide();
+            }
+            
+            // Небольшая задержка перед повторной попыткой
+            setTimeout(() => revokeKey(currentDeploymentId), 500);
+        });
+    }
+});
+
+/**
+ * Отзывает SSH ключ со ВСЕХ серверов одновременно.
+ * @param {number} keyId - ID SSH ключа
+ */
+function revokeKeyFromAllServers(keyId) {
+    if (!confirm('⚠️ ВНИМАНИЕ! Вы отозовёте этот ключ СО ВСЕХ серверов одновременно!\n\nЭто действие нельзя будет отменить. Продолжить?')) {
+        return;
+    }
+    
+    if (!confirm('Последний шанс! Отозвать ключ со ВСЕХ серверов?')) {
+        return;
+    }
+    
+    const progressDiv = document.createElement('div');
+    progressDiv.className = 'alert alert-warning position-fixed top-0 start-50 translate-middle-x p-3 m-3';
+    progressDiv.style.zIndex = '1050';
+    progressDiv.innerHTML = '<i class="bi bi-hourglass-split"></i> Отзыв ключа со всех серверов... Пожалуйста ждите...';
+    document.body.appendChild(progressDiv);
+    
+    // Таймаут на fetch запрос: 5 минут (для массовых операций)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300000);
+    
+    fetch('/key-deployments/revoke', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        },
+        body: JSON.stringify({
+            key_id: keyId,
+            server_id: null
+        }),
+        signal: controller.signal
+    })
+    .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        progressDiv.remove();
+        
+        if (data.success) {
+            const successCount = data.revoked || 0;
+            const totalCount = data.total || 0;
+            
+            let message = `✅ Операция завершена!\n\n`;
+            message += `Успешно отозвано: ${successCount}/${totalCount}\n`;
+            
+            if (data.failed && data.failed.length > 0) {
+                message += `\n⚠️ Ошибки на серверах:\n`;
+                data.failed.forEach(failure => {
+                    // Экранируем вывод для безопасности
+                    const serverId = String(failure.server_id || 'unknown').replace(/[<>]/g, '');
+                    const errorMsg = String(failure.error || 'unknown').replace(/[<>]/g, '');
+                    message += `- Сервер ID ${serverId}: ${errorMsg}\n`;
+                });
+            }
+            
+            alert(message);
+            location.reload();
+        } else {
+            alert('Критическая ошибка: ' + (data.message || 'Неизвестная ошибка'));
+        }
+    })
+    .catch(error => {
+        clearTimeout(timeoutId);
+        progressDiv.remove();
+        if (error.name === 'AbortError') {
+            alert('Ошибка: Таймаут при отзыве ключа (превышено 5 минут)');
+        } else {
+            alert('Ошибка отзыва ключа: ' + (error.message || error));
+        }
+        console.error('Ошибка при отзыве ключа:', error);
+    });
+}
+
+/**
+ * Применяет фильтры к таблице развертываний.
+ */
+function applyFilters() {
+    const keyFilter = document.getElementById('keyFilter').value;
+    const serverFilter = document.getElementById('serverFilter').value;
+    const statusFilter = document.getElementById('statusFilter').value;
+    
+    // Построение URL с параметрами фильтра
+    const params = new URLSearchParams();
+    if (keyFilter) params.append('key_id', keyFilter);
+    if (serverFilter) params.append('server_id', serverFilter);
+    if (statusFilter) params.append('status', statusFilter);
+    
+    // Перенаправление с параметрами
+    const queryString = params.toString();
+    window.location.href = queryString ? `?${queryString}` : window.location.pathname;
+}
+</script>
+{% endblock %}

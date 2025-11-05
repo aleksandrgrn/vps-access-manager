@@ -1,0 +1,319 @@
+{% extends 'base.html' %}
+
+{% block title %}Управление серверами - VPS Manager{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2">Управление серверами</h1>
+        <div>
+            <button class="btn btn-primary" 
+                    data-bs-toggle="modal" 
+                    data-bs-target="#serverModal"
+                    data-action="add"
+                    data-add-url="{{ url_for('add_server_with_password') }}">
+
+                <i class="bi bi-plus-circle me-1"></i> Добавить сервер
+            </button>
+            <button type="button" class="btn btn-success ms-2" data-bs-toggle="modal" data-bs-target="#bulkImportModal">
+                <i class="bi bi-cloud-arrow-up"></i> Массовый импорт
+            </button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Название</th>
+                            <th>IP Адрес</th>
+                            <th>Порт</th>
+                            <th>Пользователь</th>
+                            <th>Статус</th>
+                            <th>Дата добавления</th>
+                            <th class="text-end">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for server in servers %}
+                        <tr id="server-{{ server.id }}">
+                            <td data-field="name">{{ server.name }}</td>
+                            <td data-field="ip_address">{{ server.ip_address }}</td>
+                            <td data-field="ssh_port">{{ server.ssh_port }}</td>
+                            <td data-field="username">{{ server.username }}</td>
+                            <td data-field="status"><span class="badge bg-{{ status_colors.get(server.status, 'secondary') }}">{{ server.status }}</span></td>
+                            <td>{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-secondary me-1 edit-btn" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#serverModal"
+                                        data-id="{{ server.id }}"
+                                        data-action="edit">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-info me-1 test-btn" data-id="{{ server.id }}">
+                                    <i class="bi bi-shield-check"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger delete-btn" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#deleteConfirmModal"
+                                        data-id="{{ server.id }}"
+                                        data-name="{{ server.name }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center py-4">Серверы еще не добавлены.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Server Modal -->
+<div class="modal fade" id="serverModal" tabindex="-1" aria-labelledby="serverModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="serverForm" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="serverModalLabel">Добавить новый сервер</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    {{ form.hidden_tag() }}
+                    <input type="hidden" id="server-id" name="server_id">
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control", id="server-name") }}
+                    </div>
+                    <div class="mb-3">
+                        {{ form.ip_address.label(class="form-label") }}
+                        {{ form.ip_address(class="form-control", id="server-ip") }}
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            {{ form.ssh_port.label(class="form-label") }}
+                            {{ form.ssh_port(class="form-control", id="server-port") }}
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            {{ form.username.label(class="form-label") }}
+                            {{ form.username(class="form-control", id="server-username") }}
+                        </div>
+                    </div>
+                    <div class="mb-3" id="password-field">
+                        <label for="serverPassword" class="form-label">Пароль для SSH</label>
+                        <input type="password" class="form-control" id="serverPassword" name="password">
+                        <div class="form-text">Пароль используется только для первоначальной настройки ключа доступа и не сохраняется.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    {{ form.submit(class="btn btn-primary") }}
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteConfirmModalLabel">Подтверждение удаления</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Вы уверены, что хотите удалить сервер <strong id="serverNameToDelete"></strong>?
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно массового импорта серверов -->
+<div class="modal fade" id="bulkImportModal" tabindex="-1" aria-labelledby="bulkImportLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="bulkImportLabel">
+                    <i class="bi bi-cloud-arrow-up"></i> Массовый импорт серверов
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <textarea id="bulkServersList" class="form-control" rows="10" placeholder="server1.example.com ubuntu mypass123 192.168.1.10 22&#10;server2.example.com root securepass 192.168.1.11 22&#10;server3.example.com admin password456 192.168.1.12 2222" style="background-color: #f8f9fa; font-family: monospace; font-size: 12px; border: 2px solid #e9ecef;"></textarea>
+                
+                <div class="alert alert-light mt-3 mb-0" style="background-color: #f1f3f5; border: 1px solid #dee2e6;">
+                    <small class="text-muted d-block">
+                        📋 <strong>Формат:</strong> domain username password ip-address ssh-port
+                    </small>
+                    <small class="text-muted d-block mt-1">
+                        💡 Каждый сервер на новой строке, данные разделяются пробелами
+                    </small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x"></i> Отмена
+                </button>
+                <button type="button" class="btn btn-primary" id="submitBulkImport">
+                    <i class="bi bi-check"></i> Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const serverModal = document.getElementById('serverModal');
+    const passwordField = document.getElementById('password-field');
+    const serverForm = document.getElementById('serverForm');
+    const modalTitle = document.getElementById('serverModalLabel');
+
+    serverModal.addEventListener('show.bs.modal', function (event) {
+        const button = event.relatedTarget;
+        const action = button.getAttribute('data-action');
+        
+        if (action === 'add') {
+            modalTitle.textContent = 'Добавить новый сервер';
+            serverForm.action = button.getAttribute('data-add-url');
+            passwordField.style.display = 'block';
+            // Очистка полей
+            serverForm.reset();
+        } else if (action === 'edit') {
+            modalTitle.textContent = 'Редактировать сервер';
+            const serverId = button.getAttribute('data-id');
+            const serverRow = document.getElementById(`server-${serverId}`);
+            
+            // Заполнение полей формы
+            document.getElementById('server-name').value = serverRow.querySelector('[data-field="name"]').textContent;
+            document.getElementById('server-ip').value = serverRow.querySelector('[data-field="ip_address"]').textContent;
+            document.getElementById('server-port').value = serverRow.querySelector('[data-field="ssh_port"]').textContent;
+            document.getElementById('server-username').value = serverRow.querySelector('[data-field="username"]').textContent;
+            
+            serverForm.action = `/servers/edit/${serverId}`;
+            passwordField.style.display = 'none';
+        }
+    });
+
+    const deleteModal = document.getElementById('deleteConfirmModal');
+    let serverIdToDelete = null;
+
+    deleteModal.addEventListener('show.bs.modal', function (event) {
+        const button = event.relatedTarget;
+        serverIdToDelete = button.getAttribute('data-id');
+        const serverName = button.getAttribute('data-name');
+        deleteModal.querySelector('#serverNameToDelete').textContent = serverName;
+    });
+
+    const confirmBtn = document.getElementById('confirmDeleteBtn');
+    confirmBtn.addEventListener('click', async function() {
+        if (!serverIdToDelete) return;
+
+        if (!confirm('Вы уверены, что хотите удалить этот сервер? Все связанные данные будут потеряны.')) {
+            return;
+        }
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        try {
+            const response = await fetch(`/servers/delete/${serverIdToDelete}`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                alert('✅ ' + data.message);
+                document.getElementById(`server-${serverIdToDelete}`).remove();
+                bootstrap.Modal.getInstance(deleteModal).hide();
+            } else {
+                alert('❌ ' + data.message);
+            }
+        } catch (error) {
+            console.error('Ошибка при удалении сервера:', error);
+            alert('❌ Произошла ошибка при отправке запроса.');
+        }
+    });
+});
+
+// Обработчик для массового импорта серверов
+document.getElementById('submitBulkImport').addEventListener('click', function() {
+    const serversData = document.getElementById('bulkServersList').value.trim();
+    
+    if (!serversData) {
+        alert('❌ Пожалуйста, введите список серверов');
+        return;
+    }
+    
+    const lines = serversData.split('\n').filter(l => l.trim());
+    
+    if (!confirm(`🚀 Вы уверены? Будет добавлено ${lines.length} серверов.`)) {
+        return;
+    }
+    
+    // Отключить кнопку и показать загрузку
+    const btn = document.getElementById('submitBulkImport');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Загрузка...';
+    
+    // Отправить AJAX запрос
+    fetch('/api/bulk-import-servers', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+        },
+        body: JSON.stringify({
+            servers_data: serversData
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+        
+        if (data.success) {
+            // Закрыть модальное окно
+            const modal = bootstrap.Modal.getInstance(document.getElementById('bulkImportModal'));
+            modal.hide();
+            
+            // Очистить textarea
+            document.getElementById('bulkServersList').value = '';
+            
+            // Показать результаты
+            const message = `✅ Успешно добавлено: ${data.added}\n⚠️ Пропущено: ${data.skipped}\n❌ Ошибок: ${data.failed}`;
+            alert(message);
+            
+            // Перезагрузить таблицу
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            alert(`❌ Ошибка: ${data.message}`);
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+        alert(`❌ Ошибка при отправке: ${error}`);
+    });
+});
+</script>
+{% endblock %}

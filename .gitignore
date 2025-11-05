@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+
+# Flask
+instance/
+.webassets-cache
+
+
+# Базы данных
+*.db
+*.sqlite
+*.sqlite3
+vps_manager.db
+
+
+# Environment
+.env
+.env.local
+.flaskenv
+*.env
+
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+
+# Backup
+backup_v1/
+backup_files/
+*.backup
+
+
+# Логи
+logs/
+*.log
+*.log.*
+
+
+# Тесты
+htmlcov/
+.coverage
+.pytest_cache/
+
+
+# SSH ключи
+*.pem
+*.key
+id_rsa*
+*.pub
+ssh_keys/
+
+
+# Временные файлы
+*.tmp
+*.temp
+.cache/
+
+
+# Git helper
+commit.ps1
+commit-manager.ps1
+snap.ps1
+snapshots/
+
+
+# Приватные данные
+config/secrets/
+config/credentials/
+known_hosts.json
+paste.txt
+*.secret
+
+
+# Windsurf / Editor
+.windsurf/
+.cascade/
+.venv/
