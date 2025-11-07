@@ -77,6 +77,7 @@ ssh_keys/
 commit.ps1
 commit-manager.ps1
 snap.ps1
+snap-manager.ps1
 snapshots/
 
 
