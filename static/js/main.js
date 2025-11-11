@@ -17,17 +17,27 @@ document.addEventListener('DOMContentLoaded', function () {
                 const serverRow = document.getElementById(`server-${serverId}`);
 
                 modalTitle.textContent = 'Редактировать сервер';
-                form.action = `/servers/edit/${serverId}`;
+                form.action = `/api/servers/edit/${serverId}`;
 
                 // Заполнение полей формы данными из таблицы
                 document.getElementById('server-name').value = serverRow.querySelector('[data-field="name"]').textContent;
                 document.getElementById('server-ip').value = serverRow.querySelector('[data-field="ip_address"]').textContent;
                 document.getElementById('server-port').value = serverRow.querySelector('[data-field="ssh_port"]').textContent;
                 document.getElementById('server-username').value = serverRow.querySelector('[data-field="username"]').textContent;
+                
+                // Заполнение чекбокса requires_legacy_ssh
+                const requiresLegacySsh = serverRow.querySelector('[data-field="requires_legacy_ssh"]').textContent.trim();
+                document.getElementById('server-legacy-ssh').checked = requiresLegacySsh === '1';
+                
+                // Скрытие поля пароля при редактировании
+                document.getElementById('password-field').style.display = 'none';
             } else {
                 modalTitle.textContent = 'Добавить новый сервер';
                 form.action = button.getAttribute('data-add-url');
                 form.reset(); // Очистка формы для добавления
+                
+                // Показ поля пароля при добавлении
+                document.getElementById('password-field').style.display = 'block';
             }
         });
     }
@@ -45,7 +55,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         document.getElementById('confirmDeleteBtn').addEventListener('click', function () {
             if (serverIdToDelete) {
-                fetch(`/servers/delete/${serverIdToDelete}`, {
+                fetch(`/api/servers/delete/${serverIdToDelete}`, {
                     method: 'POST',
                     headers: {
                         // Flask-WTF ожидает CSRF токен
@@ -81,7 +91,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         document.getElementById('confirmDeleteKeyBtn').addEventListener('click', function () {
             if (keyIdToDelete) {
-                fetch(`/keys/delete/${keyIdToDelete}`, {
+                fetch(`/api/keys/delete/${keyIdToDelete}`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': document.querySelector('input[name=csrf_token]').value
@@ -119,7 +129,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (keyIdToDeploy && serverId) {
                 resultDiv.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">Loading...</span></div>';
 
-                fetch('/keys/deploy', {
+                fetch('/api/keys/deploy', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -150,7 +160,7 @@ document.addEventListener('DOMContentLoaded', function () {
             statusCell.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"><span class="visually-hidden">...</span></div>';
             statusCell.className = 'badge';
 
-            fetch(`/servers/test/${serverId}`, {
+            fetch(`/api/servers/test/${serverId}`, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': document.querySelector('input[name=csrf_token]').value

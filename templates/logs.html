@@ -23,45 +23,47 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for log in logs_pagination.items %}
-                        <tr>
-                            <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-                            <td>
-                                <span class="badge bg-{{ action_colors.get(log.action, 'light text-dark') }}">
-                                    {{ log.action }}
-                                </span>
-                            </td>
-                            <td>{{ log.target or 'N/A' }}</td>
-                            <td><code>{{ log.details or '{}' }}</code></td>
-                            <td>{{ log.ip_address }}</td>
-                        </tr>
+                        {% if logs_pagination.items %}
+                            {% for log in logs_pagination.items %}
+                            <tr>
+                                <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td>
+                                    <span class="badge bg-{{ action_colors.get(log.action, 'light text-dark') }}">
+                                        {{ log.action }}
+                                    </span>
+                                </td>
+                                <td>{{ log.target or 'N/A' }}</td>
+                                <td><code>{{ log.details or '{}' }}</code></td>
+                                <td>{{ log.ip_address }}</td>
+                            </tr>
+                            {% endfor %}
                         {% else %}
-                        <tr>
-                            <td colspan="5" class="text-center py-4">Записи в журнале отсутствуют.</td>
-                        </tr>
-                        {% endfor %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4">Записи в журнале отсутствуют.</td>
+                            </tr>
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
 
             <!-- Пагинация -->
-            {% if logs_pagination.pages > 1 %}
+            {% if logs_pagination and logs_pagination.pages > 1 %}
             <nav aria-label="Page navigation">
                 <ul class="pagination justify-content-center mb-0">
                     <li class="page-item {% if not logs_pagination.has_prev %}disabled{% endif %}">
-                        <a class="page-link" href="{{ url_for('logs', page=logs_pagination.prev_num) }}">Предыдущая</a>
+                        <a class="page-link" href="{{ url_for('servers.logs', page=logs_pagination.prev_num) }}">Предыдущая</a>
                     </li>
                     {% for page_num in logs_pagination.iter_pages() %}
                         {% if page_num %}
                             <li class="page-item {% if logs_pagination.page == page_num %}active{% endif %}">
-                                <a class="page-link" href="{{ url_for('logs', page=page_num) }}">{{ page_num }}</a>
+                                <a class="page-link" href="{{ url_for('servers.logs', page=page_num) }}">{{ page_num }}</a>
                             </li>
                         {% else %}
                             <li class="page-item disabled"><span class="page-link">...</span></li>
                         {% endif %}
                     {% endfor %}
                     <li class="page-item {% if not logs_pagination.has_next %}disabled{% endif %}">
-                        <a class="page-link" href="{{ url_for('logs', page=logs_pagination.next_num) }}">Следующая</a>
+                        <a class="page-link" href="{{ url_for('servers.logs', page=logs_pagination.next_num) }}">Следующая</a>
                     </li>
                 </ul>
             </nav>

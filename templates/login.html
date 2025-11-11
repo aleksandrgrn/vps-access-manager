@@ -85,16 +85,22 @@
                     </div>
                     
                     <div class="card-body p-4">
+                        <!-- Flash Messages (Soft Red-Green Style) -->
                         {% with messages = get_flashed_messages(with_categories=true) %}
-                        {% if messages %}
-                        {% for category, message in messages %}
-                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                            <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                        {% endfor %}
-                        {% endif %}
+                          {% if messages %}
+                            {% for category, message in messages %}
+                              <div class="alert alert-dismissible fade show mb-3" role="alert" 
+                                   style="background-color: {% if category == 'error' %}#f8d7da{% else %}#d4edda{% endif %}; 
+                                          color: {% if category == 'error' %}#721c24{% else %}#155724{% endif %}; 
+                                          border: 1px solid {% if category == 'error' %}#f5c6cb{% else %}#c3e6cb{% endif %};
+                                          border-radius: 6px;
+                                          padding: 12px 16px;">
+                                <i class="bi {% if category == 'error' %}bi-exclamation-triangle{% else %}bi-check-circle{% endif %} me-2"></i>
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                              </div>
+                            {% endfor %}
+                          {% endif %}
                         {% endwith %}
                         
                         <form method="POST" class="mt-4">
@@ -127,19 +133,12 @@
                                 <i class="bi bi-box-arrow-in-right me-2"></i>Войти в систему
                             </button>
                         </form>
-                        
-                        <div class="text-center mt-4">
-                            <small class="text-muted">
-                                <i class="bi bi-info-circle me-1"></i>
-                                По умолчанию: admin / admin
-                            </small>
-                        </div>
                     </div>
                 </div>
                 
                 <p class="footer-text">
                     <i class="bi bi-shield-check me-2"></i>
-                    VPS Access Manager v1.0.0
+                    VPS Access Manager v2.0.13
                 </p>
             </div>
         </div>

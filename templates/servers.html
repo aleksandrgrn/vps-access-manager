@@ -11,7 +11,7 @@
                     data-bs-toggle="modal" 
                     data-bs-target="#serverModal"
                     data-action="add"
-                    data-add-url="{{ url_for('add_server_with_password') }}">
+                    data-add-url="{{ url_for('servers.add_server') }}">
 
                 <i class="bi bi-plus-circle me-1"></i> Добавить сервер
             </button>
@@ -45,21 +45,26 @@
                             <td data-field="username">{{ server.username }}</td>
                             <td data-field="status"><span class="badge bg-{{ status_colors.get(server.status, 'secondary') }}">{{ server.status }}</span></td>
                             <td>{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <!-- Скрытые поля для редактирования -->
+                            <td data-field="requires_legacy_ssh" class="d-none">{{ server.requires_legacy_ssh|int }}</td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-secondary me-1 edit-btn" 
                                         data-bs-toggle="modal" 
                                         data-bs-target="#serverModal"
                                         data-id="{{ server.id }}"
+                                        title="Редактировать сервер"
                                         data-action="edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm btn-outline-info me-1 test-btn" data-id="{{ server.id }}">
+                                <button class="btn btn-sm btn-outline-info me-1 test-btn" data-id="{{ server.id }}"
+                                        title="Тестирование подключения">
                                     <i class="bi bi-shield-check"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger delete-btn" 
                                         data-bs-toggle="modal" 
                                         data-bs-target="#deleteConfirmModal"
                                         data-id="{{ server.id }}"
+                                        title="Удалить сервер"
                                         data-name="{{ server.name }}">
                                     <i class="bi bi-trash"></i>
                                 </button>
@@ -106,6 +111,11 @@
                             {{ form.username.label(class="form-label") }}
                             {{ form.username(class="form-control", id="server-username") }}
                         </div>
+                    </div>
+                    <div class="mb-3 form-check">
+                        {{ form.requires_legacy_ssh(class="form-check-input", id="server-legacy-ssh") }}
+                        {{ form.requires_legacy_ssh.label(class="form-check-label", for="server-legacy-ssh") }}
+                        <div class="form-text d-block">Включите, если сервер использует OpenSSH версии < 7.2. Обычно автоматически определяется при инициализации.</div>
                     </div>
                     <div class="mb-3" id="password-field">
                         <label for="serverPassword" class="form-label">Пароль для SSH</label>
@@ -205,7 +215,7 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('server-port').value = serverRow.querySelector('[data-field="ssh_port"]').textContent;
             document.getElementById('server-username').value = serverRow.querySelector('[data-field="username"]').textContent;
             
-            serverForm.action = `/servers/edit/${serverId}`;
+            serverForm.action = `/api/servers/edit/${serverId}`;
             passwordField.style.display = 'none';
         }
     });
@@ -231,7 +241,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 
         try {
-            const response = await fetch(`/servers/delete/${serverIdToDelete}`, {
+            const response = await fetch(`/api/servers/delete/${serverIdToDelete}`, {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': csrfToken
@@ -251,6 +261,52 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Ошибка при удалении сервера:', error);
             alert('❌ Произошла ошибка при отправке запроса.');
         }
+    });
+
+    // Test Server Button Handler
+    document.querySelectorAll('.test-btn').forEach(button => {
+        button.addEventListener('click', async function() {
+            const serverId = this.getAttribute('data-id');
+            const btn = this;
+            const originalHTML = btn.innerHTML;
+            
+            // Show loading spinner
+            btn.disabled = true;
+            btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+            
+            try {
+                const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+                
+                const response = await fetch(`/api/servers/test/${serverId}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Update status badge in table
+                    const statusCell = document.querySelector(`#server-${serverId} [data-field="status"]`);
+                    if (statusCell) {
+                        const badgeClass = data.status === 'online' ? 'bg-success' : 'bg-danger';
+                        statusCell.innerHTML = `<span class="badge ${badgeClass}">${data.status}</span>`;
+                    }
+                    
+                    alert(`✅ ${data.message}`);
+                } else {
+                    alert(`❌ Ошибка: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Test server error:', error);
+                alert('❌ Ошибка при проверке сервера');
+            } finally {
+                // Restore button
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+            }
+        });
     });
 });
 

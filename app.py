@@ -230,7 +230,7 @@ def login():
             return redirect(next_page or url_for('dashboard'))
         else:
             add_log('login_failed', target=form.username.data)
-            flash('Неверное имя пользователя или пароль.', 'error')
+            flash('Неправильный логин или пароль.', 'error')
             
     return render_template('login.html', form=form)
 

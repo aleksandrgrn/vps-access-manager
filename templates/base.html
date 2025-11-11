@@ -94,22 +94,22 @@
     <div class="sidebar">
         <div class="sidebar-brand">{{ 'VPS Manager' | e }}</div>
         <nav class="sidebar-nav">
-            <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+            <a href="{{ url_for('servers.dashboard') }}" class="nav-link {% if request.endpoint == 'servers.dashboard' %}active{% endif %}">
                 <i class="bi bi-speedometer2"></i> Панель управления
             </a>
-            <a href="{{ url_for('servers') }}" class="nav-link {% if request.endpoint == 'servers' %}active{% endif %}">
+            <a href="{{ url_for('servers.servers') }}" class="nav-link {% if request.endpoint == 'servers.servers' %}active{% endif %}">
                 <i class="bi bi-server"></i> Серверы
             </a>
-            <a href="{{ url_for('keys') }}" class="nav-link {% if request.endpoint == 'keys' %}active{% endif %}">
+            <a href="{{ url_for('keys.keys') }}" class="nav-link {% if request.endpoint == 'keys.keys' %}active{% endif %}">
                 <i class="bi bi-key"></i> SSH Ключи
             </a>
-            <a href="{{ url_for('key_deployments') }}" class="nav-link {% if request.endpoint == 'key_deployments' %}active{% endif %}">
+            <a href="{{ url_for('deployments.key_deployments') }}" class="nav-link {% if request.endpoint == 'deployments.key_deployments' %}active{% endif %}">
                 <i class="bi bi-diagram-3"></i> Распределение ключей
             </a>
-            <a href="{{ url_for('logs') }}" class="nav-link {% if request.endpoint == 'logs' %}active{% endif %}">
+            <a href="{{ url_for('servers.logs') }}" class="nav-link {% if request.endpoint == 'servers.logs' %}active{% endif %}">
                 <i class="bi bi-journal-text"></i> Журнал
             </a>
-            <a href="{{ url_for('logout') }}" class="nav-link mt-auto">
+            <a href="{{ url_for('auth.logout') }}" class="nav-link mt-auto">
                 <i class="bi bi-box-arrow-right"></i> Выйти
             </a>
         </nav>

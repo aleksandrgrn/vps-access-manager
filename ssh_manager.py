@@ -325,7 +325,7 @@ def _get_ssh_client(ip: str, port: int, username: str, private_key_str: str) -> 
         if key_file:
             key_file.close()
 
-def test_connection(ip: str, port: int, username: str, private_key_str: str) -> Tuple[bool, str]:
+def test_connection(ip: str, port: int, username: str, private_key_str: str, server=None) -> Tuple[bool, str]:
     """
     Тестирует SSH-соединение с сервером с улучшенной обработкой ошибок.
     
@@ -334,6 +334,7 @@ def test_connection(ip: str, port: int, username: str, private_key_str: str) -> 
         port: Порт SSH.
         username: Имя пользователя для аутентификации.
         private_key_str: Приватный ключ в формате строки.
+        server: Объект Server из БД (опционально, для адаптивных алгоритмов).
         
     Returns:
         Tuple[bool, str]: (статус_подключения, сообщение).
@@ -356,7 +357,26 @@ def test_connection(ip: str, port: int, username: str, private_key_str: str) -> 
             return False, f"Некорректный номер порта: {port}"
         
         # Пробуем подключиться
-        client = _get_ssh_client(ip, port, username, private_key_str)
+        # Если передан объект server, используем адаптивные алгоритмы
+        if server:
+            logger.info(f"[TEST_CONNECTION] Тестирование {ip}:{port} с адаптивными алгоритмами (OpenSSH: {getattr(server, 'openssh_version', 'unknown')}, Legacy: {getattr(server, 'requires_legacy_ssh', False)})")
+            key_file = None
+            try:
+                key_file = io.StringIO(private_key_str)
+                if 'RSA' in private_key_str:
+                    pkey = paramiko.RSAKey.from_private_key(key_file)
+                elif 'PRIVATE KEY' in private_key_str:
+                    pkey = paramiko.Ed25519Key.from_private_key(key_file)
+                else:
+                    raise paramiko.SSHException("Неподдерживаемый формат приватного ключа")
+                
+                client = connect_with_adaptive_algorithms(ip, port, username, pkey, server)
+            finally:
+                if key_file:
+                    key_file.close()
+        else:
+            logger.debug(f"[TEST_CONNECTION] Тестирование {ip}:{port} без адаптивных алгоритмов")
+            client = _get_ssh_client(ip, port, username, private_key_str)
         
         # Проверяем, что соединение действительно работает
         transport = client.get_transport()
@@ -616,18 +636,55 @@ def revoke_key_detailed(
     ssh_port: int,
     username: str,
     private_key_str: str,
-    public_key: str
+    public_key: str,
+    server=None
 ) -> Tuple[bool, str, str]:
     """
     Удалить ключ с ДЕТАЛЬНОЙ диагностикой ошибок.
     
+    Args:
+        server_ip: IP адрес сервера
+        ssh_port: SSH порт
+        username: Имя пользователя
+        private_key_str: Приватный ключ для доступа
+        public_key: Публичный ключ для удаления
+        server: Объект Server из БД (опционально, для legacy SSH)
+    
     Returns:
         (success: bool, message: str, error_code: str)
     """
+    # ✅ CHECK LEGACY SSH MODE
+    use_legacy_method = False
+    openssh_version = "unknown"
+    
+    if server:
+        use_legacy_method = getattr(server, 'requires_legacy_ssh', False)
+        openssh_version = getattr(server, 'openssh_version', 'unknown')
+    
+    if use_legacy_method:
+        logger.info(f"[REVOKE_LEGACY_MODE] {server_ip}:{ssh_port} OpenSSH={openssh_version} → using legacy compatible method")
+    else:
+        logger.info(f"[REVOKE_MODERN_MODE] {server_ip}:{ssh_port} OpenSSH={openssh_version} → using standard method")
     try:
         client = None
         try:
-            client = _get_ssh_client(server_ip, ssh_port, username, private_key_str)
+            # Если передан server объект, используем адаптивные алгоритмы для legacy SSH
+            if server:
+                key_file = io.StringIO(private_key_str)
+                try:
+                    if 'RSA' in private_key_str:
+                        pkey = paramiko.RSAKey.from_private_key(key_file)
+                    elif 'PRIVATE KEY' in private_key_str:
+                        pkey = paramiko.Ed25519Key.from_private_key(key_file)
+                    else:
+                        raise paramiko.SSHException("Неподдерживаемый формат приватного ключа")
+                    
+                    client = connect_with_adaptive_algorithms(server_ip, ssh_port, username, pkey, server)
+                finally:
+                    key_file.close()
+            else:
+                # Обычное подключение без адаптивных алгоритмов
+                client = _get_ssh_client(server_ip, ssh_port, username, private_key_str)
         except paramiko.ssh_exception.NoValidConnectionsError as e:
             logger.error(f"Cannot connect to {server_ip}:{ssh_port}: {str(e)}")
             return False, f'Cannot connect to {server_ip}:{ssh_port}', 'CONNECTION_TIMEOUT'
@@ -1213,6 +1270,134 @@ def deploy_key_with_password(ip: str, port: int, username: str, password: str, p
                 client.close()
             except Exception as e:
                 logger.warning(f"Ошибка при закрытии соединения: {e}")
+
+
+def deploy_key_to_multiple_servers(key_to_deploy, servers: List, encryption_key: str) -> Dict:
+    """
+    Массовое ПАРАЛЛЕЛЬНОЕ развертывание SSH-ключа на серверы.
+    
+    Args:
+        key_to_deploy: Объект SSHKey для развертывания.
+        servers: Список объектов Server из БД.
+        encryption_key: Ключ шифрования для расшифровки access_key.
+        
+    Returns:
+        Dict: {
+            'deployed': [{'server_id': int, 'server_name': str}, ...],
+            'failed': [{'server_id': int, 'server_name': str, 'error': str}, ...],
+            'total': int
+        }
+    
+    Использует ThreadPoolExecutor(max_workers=10) для параллельной обработки.
+    Таймаут: 60 сек на сервер, 300 сек общий.
+    """
+    # Валидируем публичный ключ
+    if not validate_ssh_public_key(key_to_deploy.public_key):
+        logger.error("Некорректный формат публичного ключа при массовом развертывании")
+        return {
+            "deployed": [],
+            "failed": [{"server_id": None, "server_name": "N/A", "error": "Некорректный формат публичного ключа"}],
+            "total": len(servers)
+        }
+    
+    results = {
+        "deployed": [],
+        "failed": [],
+        "total": len(servers)
+    }
+
+    def deploy_task(server):
+        """Задача для развертывания ключа на один сервер."""
+        try:
+            # Проверка наличия access_key
+            access_key = server.access_key
+            if not access_key:
+                logger.warning(f"[BULK_DEPLOY] Ключ доступа для сервера {server.id} ({server.name}) не найден")
+                return server.id, server.name, False, "Ключ доступа для сервера не найден"
+            
+            # Расшифровка access_key
+            try:
+                private_key = decrypt_private_key(
+                    access_key.private_key_encrypted, 
+                    encryption_key
+                )
+            except Exception as e:
+                logger.error(f"[BULK_DEPLOY] Ошибка при дешифровке ключа для сервера {server.id}: {e}")
+                return server.id, server.name, False, f"Ошибка при дешифровке ключа: {str(e)}"
+            
+            logger.info(f"[BULK_DEPLOY] Развертывание ключа на сервер {server.id} ({server.name}, {server.ip_address})")
+            
+            # Развертывание с адаптивными алгоритмами
+            # Передаем объект server для использования connect_with_adaptive_algorithms()
+            success, message = deploy_key(
+                server.ip_address,
+                server.ssh_port,
+                server.username,
+                private_key,
+                key_to_deploy.public_key,
+                server  # Передаем объект server для адаптивных алгоритмов
+            )
+            
+            if success:
+                logger.info(f"[BULK_DEPLOY] ✅ Ключ успешно развернут на {server.name}")
+            else:
+                logger.warning(f"[BULK_DEPLOY] ❌ Ошибка развертывания на {server.name}: {message}")
+            
+            return server.id, server.name, success, message
+            
+        except Exception as e:
+            logger.error(f"[BULK_DEPLOY] Критическая ошибка при развертывании на сервер {server.id}: {str(e)}")
+            return server.id, server.name, False, f"Критическая ошибка: {str(e)}"
+
+    # Используем ThreadPoolExecutor с таймаутом
+    try:
+        logger.info(f"[BULK_DEPLOY] Начало массового развертывания на {len(servers)} серверов")
+        
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_server = {executor.submit(deploy_task, server): server for server in servers}
+            
+            # Таймаут на каждый поток: 60 секунд, общий таймаут: 300 секунд
+            for future in as_completed(future_to_server, timeout=300):
+                try:
+                    server_id, server_name, success, message = future.result(timeout=60)
+                    
+                    if success:
+                        results["deployed"].append({
+                            "server_id": server_id,
+                            "server_name": server_name
+                        })
+                        logger.info(f"[BULK_DEPLOY] ✅ Успех: {server_name}")
+                    else:
+                        results["failed"].append({
+                            "server_id": server_id,
+                            "server_name": server_name,
+                            "error": message
+                        })
+                        logger.warning(f"[BULK_DEPLOY] ❌ Ошибка: {server_name} - {message}")
+                        
+                except FuturesTimeoutError:
+                    server = future_to_server[future]
+                    logger.error(f"[BULK_DEPLOY] ⏱️ Таймаут при развертывании на сервер {server.name}")
+                    results["failed"].append({
+                        "server_id": server.id,
+                        "server_name": server.name,
+                        "error": "Таймаут операции (60 сек)"
+                    })
+                except Exception as e:
+                    server = future_to_server[future]
+                    logger.error(f"[BULK_DEPLOY] Ошибка при обработке результата для сервера {server.name}: {e}")
+                    results["failed"].append({
+                        "server_id": server.id,
+                        "server_name": server.name,
+                        "error": str(e)
+                    })
+                    
+    except FuturesTimeoutError:
+        logger.error("[BULK_DEPLOY] ⏱️ Общий таймаут при выполнении всех операций развертывания (300 сек)")
+        results["error"] = "Общий таймаут при выполнении операций"
+
+    logger.info(f"[BULK_DEPLOY] Завершено. Успешно: {len(results['deployed'])}, Ошибок: {len(results['failed'])}")
+    return results
 
 
 def revoke_key(ip, port, username, private_key_str, public_key_to_revoke, server):
