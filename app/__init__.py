@@ -52,7 +52,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     
     # Базовая конфигурация
     app.config.update(
-        SECRET_KEY=os.environ.get('SECRET_KEY', os.urandom(32).hex()),
+        SECRET_KEY=os.environ.get('SECRET_KEY') or 'dev-secret-key-CHANGE-IN-PRODUCTION-12345',
         SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL', 'sqlite:///vps_manager.db'),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         SESSION_COOKIE_HTTPONLY=True,

@@ -110,11 +110,16 @@ python -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fer
 - Сохраните **backup** ключей (без `ENCRYPTION_KEY` невозможно расшифровать SSH-ключи)
 - Для разработки используйте `FLASK_ENV=development` 
 
-**Проверьте `.gitignore`:
+**Проверьте `.gitignore`:**
 ```bash
 # Убедитесь что .env игнорируется
 grep -q "^\.env$" .gitignore || echo ".env" >> .gitignore
 ```
+
+### ⚠️ Важно для HTTP
+
+Если разворачиваете без SSL, измените `SESSION_COOKIE_SECURE` в `app/__init__.py` на `False`. Подробности в [QUICK_START.md](QUICK_START.md).
+
 
 ---
 
@@ -164,7 +169,7 @@ gunicorn -w 4 -b 0.0.0.0:5000 "run:app"
 Проект использует модульную архитектуру на основе **Flask Blueprints** для лучшей масштабируемости и поддержки:
 
 ```
-vps-manager/
+vps-access-manager/
 ├── app/                          # Главный пакет приложения
 │   ├── __init__.py               # Application factory (create_app)
 │   ├── models.py                 # SQLAlchemy модели (User, Server, SSHKey, etc.)

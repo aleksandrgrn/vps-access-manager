@@ -13,7 +13,7 @@
 ```bash
 # Клонировать репозиторий
 git clone <repository-url>
-cd vps-manager
+cd vps-access-manager
 
 # Создать виртуальное окружение
 python -m venv venv
@@ -46,7 +46,7 @@ python generate_keys.py
 echo SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))") > .env
 echo ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())") >> .env
 echo FLASK_ENV=development >> .env
-echo DATABASE_URL=sqlite:///vps_manager.db >> .env
+echo DATABASE_URL=sqlite:///vps-access-manager.db >> .env
 ```
 
 ### 3️⃣ Инициализация базы данных (2 мин)
@@ -106,7 +106,7 @@ python run.py
 
 ### База данных создана?
 ```bash
-ls -lh vps_manager.db
+ls -lh vps-access-manager.db
 # Должен существовать файл БД
 ```
 
@@ -129,7 +129,7 @@ python -c "from app import create_app; app = create_app(); print('✅ OK')"
 ### Проблема: "ModuleNotFoundError: No module named 'app'"
 ```bash
 # Убедитесь что находитесь в корне проекта
-cd vps-manager
+cd vps-access-manager
 
 # Проверьте структуру
 ls -la app/
@@ -161,7 +161,7 @@ python run.py --port 5001
 python init_db.py
 
 # Если не помогло, удалите и пересоздайте
-rm vps_manager.db
+rm vps-access-manager.db
 python init_db.py
 python seed_db.py
 ```
@@ -182,7 +182,7 @@ python -c "from app import create_app, db; from app.models import SSHKey; app = 
 ### Новая структура проекта
 
 ```
-vps-manager/
+vps-access-manager/
 ├── app/                    # Главный пакет
 │   ├── __init__.py         # Application factory
 │   ├── models.py           # SQLAlchemy модели
@@ -261,20 +261,20 @@ pip install gunicorn
 gunicorn -w 4 -b 0.0.0.0:5000 "run:app"
 
 # Или с systemd
-sudo systemctl start vps-manager
+sudo systemctl start vps-access-manager
 ```
 
 ### С Docker (опционально)
 
 ```bash
 # Создать образ
-docker build -t vps-manager .
+docker build -t vps-access-manager .
 
 # Запустить контейнер
 docker run -d -p 5000:5000 \
-  -v $(pwd)/vps_manager.db:/app/vps_manager.db \
+  -v $(pwd)/vps-access-manager.db:/app/vps-access-manager.db \
   -v $(pwd)/.env:/app/.env \
-  vps-manager
+  vps-access-manager
 ```
 
 ### С Nginx (reverse proxy)
@@ -288,6 +288,15 @@ server {
         proxy_pass http://127.0.0.1:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass_header Set-Cookie;
+        proxy_set_header Cookie $http_cookie;
+    }
+
+    location /static {
+        alias /var/www/vps-access-manager/app/static;
+        expires 30d;
     }
 }
 ```
@@ -304,6 +313,24 @@ server {
 ## ✨ Готово!
 
 Приложение установлено и готово к использованию.
+
+## ⚠️ Важно: HTTP без SSL
+
+Если деплоите на HTTP (без SSL-сертификата), откройте `app/__init__.py` и измените:
+
+```python
+SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',
+```
+
+на:
+
+```python
+SESSION_COOKIE_SECURE=False,
+```
+
+Иначе сессии не будут работать.
+
+---
 
 **Версия:** 2.0  
 **Дата:** Ноябрь 2025  
