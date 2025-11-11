@@ -37,8 +37,8 @@
 ### 1. Клонирование репозитория
 
 ```bash
-git clone <repository-url>
-cd vps-manager
+git clone https://github.com/aleksandrgrn/vps-access-manager.git
+cd vps-access-manager
 ```
 
 ### 2. Создание виртуального окружения
