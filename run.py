@@ -12,17 +12,26 @@ from app import create_app
 app = create_app()
 
 # Настройка логирования
-if not os.path.exists('logs'):
-    os.mkdir('logs')
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'vps_manager.log')
 
-file_handler = RotatingFileHandler('logs/vps_manager.log', maxBytes=10240, backupCount=10)
-file_handler.setFormatter(logging.Formatter(
-    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-))
-file_handler.setLevel(logging.INFO)
-app.logger.addHandler(file_handler)
-app.logger.setLevel(logging.INFO)
-app.logger.info('VPS Manager startup')
+if not app.debug:
+    file_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=10485760,  # 10MB
+        backupCount=10
+    )
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('VPS Manager startup')
 
 if __name__ == '__main__':
-    app.run(debug=os.environ.get('FLASK_ENV') == 'development')
+    # Для локальной разработки: python run.py
+    # В production используется Gunicorn, этот блок не выполняется
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode)
