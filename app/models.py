@@ -123,4 +123,4 @@ class Log(db.Model):
     details = db.Column(db.Text)  # JSON string
     target = db.Column(db.String(100))
     ip_address = db.Column(db.String(45))
-    timestamp = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    timestamp = db.Column(db.DateTime, default=datetime.now)

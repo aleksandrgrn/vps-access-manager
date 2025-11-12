@@ -11,6 +11,17 @@ from app import create_app
 # Создание приложения
 app = create_app()
 
+# Настройка ProxyFix для корректной работы за обратным прокси
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1,
+    x_proto=1,
+    x_host=1,
+    x_prefix=0
+)
+
 # Настройка логирования
 log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
