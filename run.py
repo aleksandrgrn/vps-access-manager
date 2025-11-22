@@ -9,7 +9,10 @@ from logging.handlers import RotatingFileHandler
 from app import create_app
 
 # Создание приложения
-app = create_app()
+config_name = os.environ.get('FLASK_ENV')
+print(f"Starting app with config: {config_name}")
+app = create_app(config_name)
+print(f"App created. TESTING={app.config.get('TESTING')}, DB={app.config.get('SQLALCHEMY_DATABASE_URI')}")
 
 # Настройка ProxyFix для корректной работы за обратным прокси
 from werkzeug.middleware.proxy_fix import ProxyFix
