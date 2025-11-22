@@ -10,7 +10,7 @@ import logging
 from typing import Optional, Tuple
 
 import paramiko
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 

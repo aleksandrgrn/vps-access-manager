@@ -9,7 +9,6 @@ import io
 import json
 import logging
 import os
-import socket
 from typing import Dict, Optional, Tuple
 
 import paramiko
@@ -149,17 +148,20 @@ def connect_with_adaptive_algorithms(
             and server_obj.requires_legacy_ssh
         ):
             logger.info(
-                f"Using legacy SSH algorithms for {ip}:{port} (OpenSSH version: {getattr(server_obj, 'openssh_version', 'unknown')})"
+                f"Using legacy SSH algorithms for {ip}:{port} "
+                f"(OpenSSH version: {getattr(server_obj, 'openssh_version', 'unknown')})"
             )
             connect_kwargs["disabled_algorithms"] = {"pubkeys": ["rsa-sha2-512", "rsa-sha2-256"]}
         else:
             if server_obj:
                 logger.info(
-                    f"✓ Использование стандартных SSH алгоритмов для {ip}:{port} (OpenSSH версия: {getattr(server_obj, 'openssh_version', 'unknown')})"
+                    f"✓ Использование стандартных SSH алгоритмов для {ip}:{port} "
+                    f"(OpenSSH версия: {getattr(server_obj, 'openssh_version', 'unknown')})"
                 )
             else:
                 logger.debug(
-                    f"Использование стандартных SSH алгоритмов для {ip}:{port} (информация о сервере недоступна)"
+                    f"Использование стандартных SSH алгоритмов для {ip}:{port} "
+                    "(информация о сервере недоступна)"
                 )
 
         logger.debug(f"Подключение к {ip}:{port} как {username} с параметрами: {connect_kwargs}")

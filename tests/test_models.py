@@ -1,7 +1,5 @@
-import pytest
-
 from app import db
-from app.models import KeyDeployment, Server, SSHKey, User
+from app.models import KeyDeployment, Server, User
 
 
 def test_user_password_hashing(new_user):

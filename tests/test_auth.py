@@ -6,7 +6,8 @@ def test_login_success(test_client, init_database):
     assert response.status_code == 200
     assert (
         b"Dashboard" in response.data
-        or b"\xd0\x9f\xd0\xb0\xd0\xbd\xd0\xb5\xd0\xbb\xd1\x8c \xd1\x83\xd0\xbf\xd1\x80\xd0\xb0\xd0\xb2\xd0\xbb\xd0\xb5\xd0\xbd\xd0\xb8\xd1\x8f"
+        or b"\xd0\x9f\xd0\xb0\xd0\xbd\xd0\xb5\xd0\xbb\xd1\x8c "
+        b"\xd1\x83\xd0\xbf\xd1\x80\xd0\xb0\xd0\xb2\xd0\xbb\xd0\xb5\xd0\xbd\xd0\xb8\xd1\x8f"
         in response.data
     )  # "Панель управления" in bytes
 
@@ -48,7 +49,7 @@ def test_logout(test_client, init_database):
 def test_csrf_protection(test_client):
     """Test CSRF protection on login form."""
     # Try to login without CSRF token (by not using the form)
-    response = test_client.post(
+    test_client.post(
         "/login", data=dict(username="testuser", password="testpassword"), follow_redirects=False
     )
     # Should fail with 400 Bad Request (CSRF token missing)

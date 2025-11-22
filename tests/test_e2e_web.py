@@ -142,7 +142,7 @@ def test_e2e_add_server(page):
     # Wait for modal or force open
     try:
         page.wait_for_selector("#serverModal", state="visible", timeout=2000)
-    except:
+    except Exception:
         page.evaluate(
             """
             document.getElementById('serverModal').classList.add('show');
@@ -154,7 +154,7 @@ def test_e2e_add_server(page):
                 backdrop.className = 'modal-backdrop fade show';
                 document.body.appendChild(backdrop);
             }
-            
+
             // Set form action manually
             var form = document.getElementById('serverForm');
             form.action = '/api/servers/add';
@@ -196,7 +196,7 @@ def test_e2e_generate_key(page):
     # Wait for modal or force open
     try:
         page.wait_for_selector("#generateKeyModal", state="visible", timeout=2000)
-    except:
+    except Exception:
         page.evaluate(
             """
             document.getElementById('generateKeyModal').classList.add('show');

@@ -3,7 +3,7 @@ import os
 import pytest
 
 from app import create_app, db
-from app.models import KeyDeployment, Server, SSHKey, User
+from app.models import Server, SSHKey, User
 
 
 @pytest.fixture(scope="module")
