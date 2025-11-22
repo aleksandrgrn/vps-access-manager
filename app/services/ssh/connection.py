@@ -211,7 +211,7 @@ def test_connection(ip: str, port: int, username: str, private_key_str: str) -> 
         client = _get_ssh_client(ip, port, username, private_key_str)
 
         # Пробуем выполнить простую команду
-        stdin, stdout, stderr = client.exec_command('echo "Connection test"', timeout=5)
+        stdin, stdout, stderr = client.exec_command('echo "Connection test"', timeout=5)  # nosec
         exit_status = stdout.channel.recv_exit_status()
 
         if exit_status == 0:

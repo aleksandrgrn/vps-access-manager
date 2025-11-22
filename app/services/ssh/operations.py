@@ -61,7 +61,7 @@ def initialize_server(ip: str, port: int, username: str, password: str) -> Dict:
 
         # Выполняем ssh -V для получения версии
         try:
-            stdin, stdout, stderr = client.exec_command("ssh -V", timeout=10)
+            stdin, stdout, stderr = client.exec_command("ssh -V", timeout=10)  # nosec
             stdout.channel.recv_exit_status()
 
             # ssh -V выводит в stderr
@@ -160,7 +160,7 @@ def deploy_key_with_password(
             return {"success": False, "message": error}
 
         # 1. Создаем директорию .ssh если нужно
-        stdin, stdout, stderr = client.exec_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")
+        stdin, stdout, stderr = client.exec_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")  # nosec
         exit_status = stdout.channel.recv_exit_status()
         if exit_status != 0:
             error_msg = stderr.read().decode("utf-8").strip()
@@ -265,7 +265,7 @@ def deploy_key(
             return False, "Не удалось установить SSH соединение"
 
         # 1. Создаем директорию .ssh если нужно
-        stdin, stdout, stderr = client.exec_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")
+        stdin, stdout, stderr = client.exec_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")  # nosec
         exit_status = stdout.channel.recv_exit_status()
         if exit_status != 0:
             error = stderr.read().decode("utf-8")
