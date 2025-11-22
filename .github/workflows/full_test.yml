@@ -29,7 +29,7 @@ jobs:
         playwright install chromium
 
     - name: Run Black Check
-      run: black --check app/ tests/
+      run: black --check --line-length 100 app/ tests/
 
     - name: Run Isort Check
       run: isort --check-only --profile black app/ tests/
