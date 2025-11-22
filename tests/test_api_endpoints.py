@@ -1,5 +1,7 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 from app.models import Server, SSHKey
+
 
 @patch("app.services.ssh.initialize_server")
 @patch("app.services.ssh.generate_ssh_key")

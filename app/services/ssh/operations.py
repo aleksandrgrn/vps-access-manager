@@ -4,13 +4,24 @@ SSH Operations Module
 Handles high-level SSH operations like key deployment, revocation, and server initialization.
 """
 
-import logging
 import io
-import paramiko
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed
 from typing import Dict, List, Tuple
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
-from app.services.ssh.connection import connect_with_password, connect_with_adaptive_algorithms
-from app.services.ssh.keys import validate_ssh_public_key, parse_openssh_version, decrypt_private_key
+
+import paramiko
+
+from app.services.ssh.connection import (
+    connect_with_adaptive_algorithms,
+    connect_with_password,
+)
+from app.services.ssh.keys import (
+    decrypt_private_key,
+    parse_openssh_version,
+    validate_ssh_public_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +62,7 @@ def initialize_server(ip: str, port: int, username: str, password: str) -> Dict:
         # Выполняем ssh -V для получения версии
         try:
             stdin, stdout, stderr = client.exec_command("ssh -V", timeout=10)
-            exit_status = stdout.channel.recv_exit_status()
+            stdout.channel.recv_exit_status()
 
             # ssh -V выводит в stderr
             version_output = stderr.read().decode("utf-8").strip()
@@ -82,7 +93,8 @@ def initialize_server(ip: str, port: int, username: str, password: str) -> Dict:
                     logger.warning(f"Ошибка при парсинге версии {openssh_version}: {e}")
 
             logger.info(
-                f"Инициализация сервера {ip} успешна. OpenSSH версия: {openssh_version}, Legacy: {requires_legacy_ssh}"
+                f"Инициализация сервера {ip} успешна. "
+                f"OpenSSH версия: {openssh_version}, Legacy: {requires_legacy_ssh}"
             )
 
             return {
@@ -451,7 +463,7 @@ def revoke_key(
                     content = f.read().decode("utf-8")
             except FileNotFoundError:
                 sftp.close()
-                return {"success": False, "message": f"Файл authorized_keys не найден"}
+                return {"success": False, "message": "Файл authorized_keys не найден"}
 
             lines = content.strip().split("\n")
             key_found = False
@@ -553,7 +565,8 @@ def revoke_key_from_all_servers(key_to_revoke, servers: List, access_keys: Dict)
 
     # ВНИМАНИЕ: Эта функция требует доработки по сравнению с оригиналом,
     # так как в оригинале она принимала user_credentials.
-    # Я оставлю её заглушкой и исправлю в следующем шаге, так как мне нужно видеть, как она вызывается.
+    # Я оставлю её заглушкой и исправлю в следующем шаге, так как мне нужно видеть,
+    # как она вызывается.
     # В routes/deployments.py она вызывается как:
     # bulk_result = revoke_key_from_all_servers(key_to_revoke, servers, access_keys)
     # Но access_keys там словарь id -> SSHKey object.
@@ -566,7 +579,8 @@ def revoke_key_from_all_servers(key_to_revoke, servers: List, access_keys: Dict)
     # bulk_result = revoke_key_from_all_servers(key_to_revoke, servers, access_keys)
 
     # А в ssh_manager.py:
-    # def revoke_key_from_all_servers(public_key: str, all_servers: List, user_credentials: Dict) -> Dict:
+    # def revoke_key_from_all_servers(public_key: str, all_servers: List,
+    #                                 user_credentials: Dict) -> Dict:
 
     # Значит в routes/deployments.py был вызов с ошибкой или я что-то упустил?
     # В routes/deployments.py (строка 292)
@@ -577,7 +591,8 @@ def revoke_key_from_all_servers(key_to_revoke, servers: List, access_keys: Dict)
     # )
 
     # Это явно не совпадает с сигнатурой в ssh_manager.py.
-    # Видимо, код в routes/deployments.py уже был изменен под другую сигнатуру или я неправильно прочитал.
+    # Видимо, код в routes/deployments.py уже был изменен под другую сигнатуру
+    # или я неправильно прочитал.
     # Нет, я вижу код routes/deployments.py в Step 85.
     # from app.services.key_service import ... revoke_key_from_all_servers
 
