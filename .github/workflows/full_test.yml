@@ -1,0 +1,65 @@
+name: Full Testing Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      ENCRYPTION_KEY: "D05b90V8baMUFcWkp8sSZgm20brcjj_wLjuVayxUZ2o="
+      SECRET_KEY: "testing-secret-key"
+      FLASK_ENV: testing
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+        playwright install chromium
+
+    - name: Run Black Check
+      run: black --check --line-length 100 app/ tests/
+
+    - name: Run Isort Check
+      run: isort --check-only --profile black app/ tests/
+
+    - name: Run Flake8
+      run: flake8 app/ tests/ --max-line-length=100 --exclude=migrations
+
+    - name: Run Pylint
+      run: |
+        find app tests -type f -name "*.py" | xargs pylint --max-line-length=100 || true
+
+    - name: Run MyPy
+      run: mypy app/ --ignore-missing-imports --no-strict-optional || true
+
+    - name: Run Bandit Security Check
+      run: bandit -r app/ -ll
+
+    - name: Run Safety Check
+      run: safety check
+
+    - name: Run Unit & Integration Tests
+      run: |
+        pytest tests/test_auth.py tests/test_models.py tests/test_ssh_operations.py tests/test_api_endpoints.py -v --cov=app --cov-report=term-missing
+
+    - name: Run E2E Tests
+      run: |
+        pytest tests/test_e2e_web.py -v

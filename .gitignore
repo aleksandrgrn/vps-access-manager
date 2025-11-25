@@ -10,26 +10,38 @@ ENV/
 *.egg-info/
 dist/
 build/
-
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg
+MANIFEST
 
 # Flask
 instance/
 .webassets-cache
-
 
 # Базы данных
 *.db
 *.sqlite
 *.sqlite3
 vps_manager.db
-
+test.db
+test_e2e.db
 
 # Environment
 .env
 .env.local
 .flaskenv
 *.env
-
+.env.*
 
 # IDE
 .vscode/
@@ -40,24 +52,36 @@ vps_manager.db
 .DS_Store
 Thumbs.db
 
-
 # Backup
 backup_v1/
 backup_files/
 *.backup
-
 
 # Логи
 logs/
 *.log
 *.log.*
 
-
-# Тесты
+# Тесты и покрытие кода
 htmlcov/
 .coverage
 .pytest_cache/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+test_output.txt
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
 
+# Отчеты (добавлено)
+reports/*.txt
+reports/*.json
+reports/screenshots/*.png
+reports/screenshots/*.jpg
 
 # SSH ключи
 *.pem
@@ -66,12 +90,13 @@ id_rsa*
 *.pub
 ssh_keys/
 
-
 # Временные файлы
 *.tmp
 *.temp
 .cache/
-
+temp.txt
+temp/
+tmp/
 
 # Git helper
 commit.ps1
@@ -80,7 +105,6 @@ snap.ps1
 snap-manager.ps1
 snapshots/
 
-
 # Приватные данные
 config/secrets/
 config/credentials/
@@ -88,8 +112,26 @@ known_hosts.json
 paste.txt
 *.secret
 
-
 # Windsurf / Editor
 .windsurf/
 .cascade/
 .venv/
+
+# MyPy и линтеры (добавлено)
+.mypy_cache/
+.pylint.d/
+.flake8_cache/
+
+# Playwright (E2E тесты)
+test-results/
+playwright-report/
+
+# Python cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
