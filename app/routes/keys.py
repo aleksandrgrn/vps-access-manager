@@ -82,10 +82,13 @@ def generate_key() -> Any:
         if existing_key:
             # Ключ уже существует - используем его
             logger.info(
-                f"[KEY_EXISTS] Ключ с fingerprint {fingerprint} уже существует (ID: {existing_key.id}, имя: '{existing_key.name}')"
+                f"[KEY_EXISTS] Ключ с fingerprint {fingerprint} уже существует "
+                f"(ID: {existing_key.id}, имя: '{existing_key.name}')"
             )
             flash(
-                f'ℹ️ Ключ с таким fingerprint уже существует: "{existing_key.name}". Будет использован существующий ключ.',
+                f"ℹ️ Ключ с таким fingerprint уже существует: "
+                f'"{existing_key.name}". '
+                "Будет использован существующий ключ.",
                 "info",
             )
             key_to_use = existing_key
@@ -170,10 +173,13 @@ def upload_key() -> Any:
         if existing_key:
             # Ключ уже существует - используем его
             logger.info(
-                f"[KEY_EXISTS] Ключ с fingerprint {fingerprint} уже существует (ID: {existing_key.id}, имя: '{existing_key.name}')"
+                f"[KEY_EXISTS] Ключ с fingerprint {fingerprint} уже существует "
+                f"(ID: {existing_key.id}, имя: '{existing_key.name}')"
             )
             flash(
-                f'ℹ️ Ключ с таким fingerprint уже существует: "{existing_key.name}". Будет использован существующий ключ.',
+                f"ℹ️ Ключ с таким fingerprint уже существует: "
+                f'"{existing_key.name}". '
+                "Будет использован существующий ключ.",
                 "info",
             )
             key_to_use = existing_key
@@ -434,7 +440,8 @@ def view_key(key_id: int) -> Tuple[Dict[str, Any], int]:
         # Проверка доступа
         if ssh_key.user_id != current_user.id:
             logger.error(
-                f"[VIEW_KEY] Access denied: user_id={current_user.id}, key_user_id={ssh_key.user_id}"
+                f"[VIEW_KEY] Access denied: user_id={current_user.id}, "
+                f"key_user_id={ssh_key.user_id}"
             )
             return jsonify({"success": False, "message": "Доступ запрещён"}), 403
 
@@ -525,7 +532,8 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
         # Проверка доступа к ключу
         if key.user_id != current_user.id:
             logger.warning(
-                f"[BULK_DEPLOY] Попытка доступа к чужому ключу: user={current_user.id}, key_owner={key.user_id}"
+                f"[BULK_DEPLOY] Попытка доступа к чужому ключу: user={current_user.id}, "
+                f"key_owner={key.user_id}"
             )
             return jsonify({"success": False, "message": "Доступ запрещён"}), 403
 
@@ -551,7 +559,10 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
                 jsonify(
                     {
                         "success": False,
-                        "message": f'Серверы без ключа доступа: {", ".join(servers_without_access_key)}',
+                        "message": (
+                            f"Серверы без ключа доступа: "
+                            f'{", ".join(servers_without_access_key)}'
+                        ),
                     }
                 ),
                 400,
@@ -561,7 +572,7 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
         existing_deployments = KeyDeployment.query.filter(
             KeyDeployment.ssh_key_id == key_id,
             KeyDeployment.server_id.in_(server_ids),
-            KeyDeployment.revoked_at == None,
+            KeyDeployment.revoked_at.is_(None),
         ).all()
 
         if existing_deployments:
@@ -579,7 +590,8 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
             )
 
         logger.info(
-            f"[BULK_DEPLOY] Начало массового развертывания ключа {key.name} на {len(servers)} серверов"
+            f"[BULK_DEPLOY] Начало массового развертывания ключа {key.name} "
+            f"на {len(servers)} серверов"
         )
 
         # Массовое развертывание через ssh_manager
@@ -610,7 +622,8 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
 
             except Exception as db_error:
                 logger.error(
-                    f"[BULK_DEPLOY] Ошибка БД для сервера {deployed['server_name']}: {str(db_error)}"
+                    f"[BULK_DEPLOY] Ошибка БД для сервера {deployed['server_name']}: "
+                    f"{str(db_error)}"
                 )
                 # Не прерываем процесс, продолжаем для других серверов
 
@@ -643,7 +656,7 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
         elif success_count > 0 and failed_count > 0:
             message = f"⚠️ Развёрнуто на {success_count} серверах, ошибок: {failed_count}"
         else:
-            message = f"❌ Не удалось развернуть ни на одном сервере"
+            message = "❌ Не удалось развернуть ни на одном сервере"
 
         logger.info(f"[BULK_DEPLOY] Завершено. {message}")
 

@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, flash, jsonify, render_template, request
 from flask_login import current_user, login_required
 
 from app import db
@@ -278,7 +278,7 @@ def revoke_key_deployment() -> Tuple[Dict[str, Any], int]:
                     jsonify(
                         {
                             "success": True,
-                            "message": f"✅ Ключ успешно отозван с VPS",
+                            "message": "✅ Ключ успешно отозван с VPS",
                             "server": server.name,
                             "ip": server.ip_address,
                         }
@@ -518,7 +518,8 @@ def revoke_key_all() -> Tuple[Dict[str, Any], int]:
         # Проверка доступа
         if key_to_revoke.user_id != current_user.id:
             logger.error(
-                f"[REVOKE_ALL] Access denied: user_id={current_user.id}, key_user_id={key_to_revoke.user_id}"
+                f"[REVOKE_ALL] Access denied: user_id={current_user.id}, "
+                f"key_user_id={key_to_revoke.user_id}"
             )
             return jsonify({"success": False, "message": "Access denied"}), 403
 
@@ -552,11 +553,13 @@ def revoke_key_all() -> Tuple[Dict[str, Any], int]:
                 servers.append(server)
                 access_keys[server.id] = server.access_key
                 logger.debug(
-                    f"[REVOKE_ALL] Added server {server.name} (access_key_id={server.access_key.id})"
+                    f"[REVOKE_ALL] Added server {server.name} "
+                    f"(access_key_id={server.access_key.id})"
                 )
             else:
                 logger.warning(
-                    f"[REVOKE_ALL] Skipping server {server.name if server else 'Unknown'} - no access_key"
+                    f"[REVOKE_ALL] Skipping server "
+                    f"{server.name if server else 'Unknown'} - no access_key"
                 )
 
         if not servers:
@@ -596,14 +599,18 @@ def revoke_key_all() -> Tuple[Dict[str, Any], int]:
         )
 
         logger.info(
-            f"[REVOKE_ALL_SUCCESS] Revoked from {bulk_result['success_count']}/{len(servers)} servers"
+            f"[REVOKE_ALL_SUCCESS] Revoked from "
+            f"{bulk_result['success_count']}/{len(servers)} servers"
         )
 
         return (
             jsonify(
                 {
                     "success": True,
-                    "message": f'✅ Отозвано с {bulk_result["success_count"]} из {len(servers)} серверов',
+                    "message": (
+                        f"✅ Отозвано с {bulk_result['success_count']} из "
+                        f"{len(servers)} серверов"
+                    ),
                     "total": len(servers),
                     "completed": bulk_result["success_count"],
                     "failed": bulk_result["failed_count"],
@@ -919,7 +926,10 @@ def deploy_key() -> Tuple[Dict[str, Any], int]:
             jsonify(
                 {
                     "success": True,
-                    "message": f"Развёртывание завершено: {success_count} успешно, {failed_count} ошибок",
+                    "message": (
+                        f"Развёртывание завершено: {success_count} успешно, "
+                        f"{failed_count} ошибок"
+                    ),
                     "success_count": success_count,
                     "failed_count": failed_count,
                     "results": results,

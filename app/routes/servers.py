@@ -155,7 +155,8 @@ def add_server() -> Any:
         )
 
         logger.info(
-            f"[ADD_SERVER] Сервер инициализирован. OpenSSH: {openssh_version}, Legacy: {requires_legacy_ssh}"
+            f"[ADD_SERVER] Сервер инициализирован. OpenSSH: {openssh_version}, "
+            f"Legacy: {requires_legacy_ssh}"
         )
         flash(f"Сервер инициализирован. OpenSSH версия: {openssh_version}", "info")
 
@@ -318,7 +319,8 @@ def edit_server(server_id: int) -> Tuple[Dict[str, Any], int]:
             db.session.commit()
 
             logger.info(
-                f"[EDIT_SERVER] Сервер {server.name} обновлён. Legacy SSH: {server.requires_legacy_ssh}"
+                f"[EDIT_SERVER] Сервер {server.name} обновлён. "
+                f"Legacy SSH: {server.requires_legacy_ssh}"
             )
             add_log(
                 "edit_server",
@@ -401,7 +403,10 @@ def test_server(server_id: int) -> Tuple[Dict[str, Any], int]:
                 jsonify(
                     {
                         "success": False,
-                        "message": "Для этого сервера не настроен ключ доступа. Пожалуйста, пересоздайте сервер.",
+                        "message": (
+                            "Для этого сервера не настроен ключ доступа. "
+                            "Пожалуйста, пересоздайте сервер."
+                        ),
                     }
                 ),
                 400,
@@ -579,7 +584,8 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 openssh_version = init_result.get("openssh_version", "unknown")
                 requires_legacy_ssh = init_result.get("requires_legacy_ssh", False)
                 logger.info(
-                    f"[BULK_IMPORT] {domain}: OpenSSH {openssh_version}, legacy={requires_legacy_ssh}"
+                    f"[BULK_IMPORT] {domain}: OpenSSH {openssh_version}, "
+                    f"legacy={requires_legacy_ssh}"
                 )
 
             except Exception as e:
@@ -597,7 +603,8 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
 
                 if existing_key:
                     logger.info(
-                        f"[BULK_IMPORT] {domain}: используется существующий ключ '{existing_key.name}' (ID: {existing_key.id})"
+                        f"[BULK_IMPORT] {domain}: используется существующий ключ '"
+                        f"{existing_key.name}' (ID: {existing_key.id})"
                     )
                     new_root_key = existing_key
                     public_key_ssh = existing_key.public_key  # ✅ КЛЮЧЕВАЯ СТРОКА
@@ -690,7 +697,8 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 db.session.add(deployment)
                 db.session.commit()
                 logger.info(
-                    f"[BULK_IMPORT] KeyDeployment создан: ключ {new_root_key.id} -> сервер {new_server.id}"
+                    f"[BULK_IMPORT] KeyDeployment создан: ключ {new_root_key.id} -> "
+                    f"сервер {new_server.id}"
                 )
 
             except Exception as e:

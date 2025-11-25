@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 
 import pytest
 from playwright.sync_api import sync_playwright
@@ -14,8 +15,7 @@ def flask_app():
     db_path = "instance/test_e2e.db"  # ← ПРАВИЛЬНЫЙ ПУТЬ!
 
     # ========== ПРИНУДИТЕЛЬНОЕ УДАЛЕНИЕ ==========
-    import time
-    import uuid
+    # Базы данных и UUID уже импортированы ниже
 
     max_retries = 3
     for i in range(max_retries):
@@ -269,7 +269,8 @@ def test_e2e_deploy_key_failure(page, flask_app):
         page.wait_for_selector("#serverModal", state="visible", timeout=2000)
     except Exception:
         page.evaluate(
-            "document.getElementById('serverModal').classList.add('show'); document.getElementById('serverModal').style.display = 'block';"
+            "document.getElementById('serverModal').classList.add('show'); "
+            "document.getElementById('serverModal').style.display = 'block';"
         )
 
     page.fill('input[name="name"]', "deploy-fail-server", force=True)
@@ -287,7 +288,8 @@ def test_e2e_deploy_key_failure(page, flask_app):
         page.wait_for_selector("#generateKeyModal", state="visible", timeout=2000)
     except Exception:
         page.evaluate(
-            "document.getElementById('generateKeyModal').classList.add('show'); document.getElementById('generateKeyModal').style.display = 'block';"
+            "document.getElementById('generateKeyModal').classList.add('show'); "
+            "document.getElementById('generateKeyModal').style.display = 'block';"
         )
 
     page.fill('input[name="name"]', "deploy-fail-key", force=True)
@@ -380,7 +382,8 @@ def test_e2e_revoke_deployment_failure(page, flask_app):
         page.wait_for_selector("#serverModal", state="visible", timeout=2000)
     except Exception:
         page.evaluate(
-            "document.getElementById('serverModal').classList.add('show'); document.getElementById('serverModal').style.display = 'block';"
+            "document.getElementById('serverModal').classList.add('show'); "
+            "document.getElementById('serverModal').style.display = 'block';"
         )
 
     page.fill('input[name="name"]', "revoke-test-server", force=True)
@@ -399,7 +402,8 @@ def test_e2e_revoke_deployment_failure(page, flask_app):
         page.wait_for_selector("#generateKeyModal", state="visible", timeout=2000)
     except Exception:
         page.evaluate(
-            "document.getElementById('generateKeyModal').classList.add('show'); document.getElementById('generateKeyModal').style.display = 'block';"
+            "document.getElementById('generateKeyModal').classList.add('show'); "
+            "document.getElementById('generateKeyModal').style.display = 'block';"
         )
 
     page.fill('input[name="name"]', "revoke-test-key", force=True)
@@ -441,6 +445,9 @@ def test_e2e_revoke_deployment_failure(page, flask_app):
     # 3. Go to deployments page and revoke
     page.goto(f"{flask_app}/api/key-deployments", wait_until="domcontentloaded")
     page.wait_for_selector("text=revoke-test-key", timeout=5000)
+
+    # Инициализация переменной dialog_received перед использованием
+    dialog_received = []
 
     # Click revoke button (mock will fail for IP 192.0.2.200)
     page.click('tr:has-text("revoke-test-key") button[data-action="revoke"]', force=True)

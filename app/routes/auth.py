@@ -11,7 +11,7 @@ from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
 from app.forms import LoginForm
-from app.models import Log, Server, SSHKey, User
+from app.models import User
 from app.utils import add_log
 
 bp = Blueprint("auth", __name__)
@@ -142,7 +142,7 @@ def change_password() -> Any:
         # Логирование события
         try:
             add_log("change_password", target=current_user.username)
-        except:
+        except Exception:
             pass  # Если add_log не существует - пропускаем
 
         flash("Пароль успешно изменён!", "success")

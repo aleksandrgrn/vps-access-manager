@@ -2,11 +2,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Импорт должен быть перед skip для корректной работы Flake8
+# Однако pytest.skip прервет выполнение, поэтому этот импорт никогда не выполнится
+try:
+    from app.services.ssh.operations import deploy_key, revoke_key
+except ImportError:
+    pass
+
 pytest.skip(
     "Модуль app.services.ssh.operations отсутствует в текущей версии", allow_module_level=True
 )
-
-from app.services.ssh.operations import deploy_key, revoke_key
 
 
 @pytest.fixture

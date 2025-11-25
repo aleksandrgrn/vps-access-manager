@@ -7,9 +7,9 @@ Key Service - обёртка над ssh_manager с полной обработк
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
 
 import ssh_manager
 from app.models import Server, SSHKey
@@ -34,7 +34,8 @@ def decrypt_access_key(access_key: "SSHKey") -> Dict[str, Any]:
     ЯКОРЬ: Эта функция КРИТИЧНА - без неё SSH операции невозможны!
     """
     logger.info(
-        f"[DECRYPT_START] Начало расшифровки access_key (key_id={access_key.id if access_key else None})"
+        f"[DECRYPT_START] Начало расшифровки access_key "
+        f"(key_id={access_key.id if access_key else None})"
     )
 
     # ЭТАП 1: Валидация входных данных
@@ -75,7 +76,8 @@ def decrypt_access_key(access_key: "SSHKey") -> Dict[str, Any]:
         # ЭТАП 5: Валидация результата
         if not private_key or len(private_key) < 100:
             logger.error(
-                f"[DECRYPT_ERROR_VALIDATION] Результат расшифровки пуст или слишком короткий (len={len(private_key) if private_key else 0})"
+                f"[DECRYPT_ERROR_VALIDATION] Результат расшифровки пуст или слишком короткий "
+                f"(len={len(private_key) if private_key else 0})"
             )
             return {
                 "success": False,
@@ -88,7 +90,8 @@ def decrypt_access_key(access_key: "SSHKey") -> Dict[str, Any]:
 
     except InvalidToken:
         logger.error(
-            f"[DECRYPT_ERROR_VALIDATION] InvalidToken - неверный ENCRYPTION_KEY или повреждённые данные"
+            "[DECRYPT_ERROR_VALIDATION] InvalidToken - "
+            "неверный ENCRYPTION_KEY или повреждённые данные"
         )
         return {
             "success": False,
@@ -134,7 +137,8 @@ def revoke_key_from_single_server(
     ЯКОРЬ: Эта функция ДОЛЖНА вернуть success=False если SSH не удался!
     """
     logger.info(
-        f"[REVOKE_SSH_START] Отзыв ключа {key_to_revoke.name} с сервера {server.name} ({server.ip_address})"
+        f"[REVOKE_SSH_START] Отзыв ключа {key_to_revoke.name} с сервера "
+        f"{server.name} ({server.ip_address})"
     )
 
     try:
@@ -243,7 +247,8 @@ def revoke_key_from_all_servers(
         )
 
     logger.info(
-        f"[REVOKE_BULK_COMPLETE] Успешно: {results['success_count']}, Ошибок: {results['failed_count']}"
+        f"[REVOKE_BULK_COMPLETE] Успешно: {results['success_count']}, "
+        f"Ошибок: {results['failed_count']}"
     )
     return results
 
@@ -322,7 +327,8 @@ def test_server_connection(server: Server, private_key: str) -> Dict[str, Any]:
 
         if success:
             logger.info(
-                f"[TEST_CONNECTION_SUCCESS] Соединение с {server.name} успешно установлено ({ssh_format})"
+                f"[TEST_CONNECTION_SUCCESS] Соединение с {server.name} успешно "
+                f"установлено ({ssh_format})"
             )
             return {
                 "success": True,
