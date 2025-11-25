@@ -145,6 +145,9 @@ def test_e2e_login_flow(page):
 @pytest.mark.e2e
 def test_e2e_add_server(page):
     """Test adding a server."""
+    if os.environ.get("CI"):
+        pytest.skip("Пропуск E2E теста с реальным SSH в CI среде")
+
     # Login first
     page.goto("http://127.0.0.1:5000/login")
     page.fill('input[name="username"]', "admin")
