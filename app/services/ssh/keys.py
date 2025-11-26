@@ -73,7 +73,9 @@ def get_fingerprint(public_key_str: str) -> Optional[str]:
             return None
 
         key_data = base64.b64decode(key_parts[1])
-        md5_hash = hashlib.md5(key_data).hexdigest()
+        md5_hash = hashlib.md5(
+            key_data, usedforsecurity=False
+        ).hexdigest()  # nosec: SSH fingerprint only
         fingerprint = ":".join(a + b for a, b in zip(md5_hash[::2], md5_hash[1::2]))
 
         logger.debug(f"Вычислен fingerprint: {fingerprint}")

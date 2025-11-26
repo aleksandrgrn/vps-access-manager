@@ -253,7 +253,7 @@ class SSHConnection:
             raise RuntimeError("SSH соединение не установлено. Сначала вызовите connect_*")
 
         try:
-            stdin, stdout, stderr = self.client.exec_command(command, timeout=timeout)
+            stdin, stdout, stderr = self.client.exec_command(command, timeout=timeout)  # nosec
             stdout_str = stdout.read().decode("utf-8")
             stderr_str = stderr.read().decode("utf-8")
             exit_status = stdout.channel.recv_exit_status()
