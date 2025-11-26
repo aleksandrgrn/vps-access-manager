@@ -7,23 +7,22 @@ from app.models import KeyDeployment, SSHKey
 
 @pytest.fixture
 def mock_ssh_keygen():
-    with patch("app.services.ssh.generate_ssh_key") as mock:
+    with patch("app.services.ssh.keys.generate_ssh_key") as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_ssh_fingerprint():
-    with patch("app.services.ssh.get_fingerprint") as mock:
+    with patch("app.services.ssh.keys.get_fingerprint") as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_ssh_validate():
-    with patch("app.services.ssh.validate_ssh_public_key") as mock:
+    with patch("app.services.ssh.keys.validate_ssh_public_key") as mock:
         yield mock
 
 
-@pytest.mark.skip(reason="Требует рефакторинга SSH")
 def test_generate_key_success(auth_client, mock_ssh_keygen, mock_ssh_fingerprint):
     """Test successful key generation."""
     mock_ssh_keygen.return_value = ("private_pem", "ssh-ed25519 public_key")
@@ -38,7 +37,6 @@ def test_generate_key_success(auth_client, mock_ssh_keygen, mock_ssh_fingerprint
     assert SSHKey.query.filter_by(name="New Key").first() is not None
 
 
-@pytest.mark.skip(reason="Проблема с кодировкой текста ошибки")
 def test_generate_key_duplicate_name(auth_client, new_ssh_key):
     """Test generating key with duplicate name."""
     response = auth_client.post(
@@ -54,7 +52,6 @@ def test_generate_key_duplicate_name(auth_client, new_ssh_key):
     )  # "уже существует"
 
 
-@pytest.mark.skip(reason="Требует рефакторинга SSH")
 def test_upload_key_success(auth_client, mock_ssh_validate, mock_ssh_fingerprint):
     """Test successful key upload."""
     mock_ssh_validate.return_value = True

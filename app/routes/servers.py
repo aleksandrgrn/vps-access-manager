@@ -22,11 +22,12 @@ from flask import (
 )
 from flask_login import current_user, login_required
 
-import ssh_manager
 from app import db
 from app.forms import ServerForm
 from app.models import KeyDeployment, Log, Server, SSHKey
 from app.services.key_service import decrypt_access_key, test_server_connection
+from app.services.ssh import keys as ssh_keys
+from app.services.ssh.connection import SSHConnection
 from app.utils import add_log
 
 bp = Blueprint("servers", __name__)
@@ -136,23 +137,43 @@ def add_server() -> Any:
     # ЭТАП 1: Инициализация сервера (определение версии OpenSSH)
     try:
         logger.info(f"[ADD_SERVER] Инициализация сервера {ip_address}:{port}")
-        init_result = ssh_manager.initialize_server(ip_address, port, username, password)
 
-        if not init_result["success"]:
-            flash(f'Ошибка инициализации сервера: {init_result["message"]}', "danger")
-            add_log(
-                "add_server_failed", details={"ip": ip_address, "error": init_result["message"]}
-            )
+        # Подключаемся и определяем версию OpenSSH
+        conn = SSHConnection(ip_address, port, username)
+        conn_success, conn_error = conn.connect_with_password(password)
+
+        if not conn_success:
+            flash(f"Ошибка подключения: {conn_error}", "danger")
+            add_log("add_server_failed", details={"ip": ip_address, "error": conn_error})
             return redirect(url_for("servers.servers"))
 
-        openssh_version = init_result["openssh_version"]
-        # Если пользователь явно установил requires_legacy_ssh в форме, используем его значение
-        # Иначе используем автоматически определённое значение
-        requires_legacy_ssh = (
-            form.requires_legacy_ssh.data
-            if form.requires_legacy_ssh.data
-            else init_result["requires_legacy_ssh"]
-        )
+        try:
+            # Определяем версию OpenSSH
+            cmd_success, stdout, stderr = conn.execute("ssh -V 2>&1", timeout=10)
+            if cmd_success and stdout:
+                import re
+
+                match = re.search(r"OpenSSH_(\S+)", stdout)
+                openssh_version = match.group(1) if match else "unknown"
+                logger.info(f"Определена версия OpenSSH: {openssh_version}")
+            else:
+                openssh_version = "unknown"
+                logger.warning(f"Не удалось определить версию OpenSSH: {stderr}")
+        finally:
+            conn.close()
+
+        # Определяем, нужен ли legacy SSH (OpenSSH < 7.2)
+        try:
+            version_parts = openssh_version.replace("p", ".").split(".")
+            major = int(version_parts[0]) if version_parts else 0
+            minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+            requires_legacy_ssh = (major < 7) or (major == 7 and minor < 2)
+        except (ValueError, IndexError):
+            requires_legacy_ssh = False  # По умолчанию используем modern SSH
+
+        # Переопределяем, если пользователь явно указал в форме
+        if form.requires_legacy_ssh.data is not None:
+            requires_legacy_ssh = form.requires_legacy_ssh.data
 
         logger.info(
             f"[ADD_SERVER] Сервер инициализирован. OpenSSH: {openssh_version}, "
@@ -169,8 +190,8 @@ def add_server() -> Any:
     # ЭТАП 2: Генерация уникального root ключа
     try:
         logger.info(f"[ADD_SERVER] Генерация root ключа для {ip_address}")
-        private_key_pem, public_key_ssh = ssh_manager.generate_ssh_key("rsa")
-        fingerprint = ssh_manager.get_fingerprint(public_key_ssh)
+        private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key("rsa")
+        fingerprint = ssh_keys.get_fingerprint(public_key_ssh)
 
         if not fingerprint or SSHKey.query.filter_by(fingerprint=fingerprint).first():
             flash("Не удалось сгенерировать уникальный ключ. Попробуйте еще раз.", "danger")
@@ -188,7 +209,7 @@ def add_server() -> Any:
             flash("ENCRYPTION_KEY не установлен на сервере", "danger")
             return redirect(url_for("servers.servers"))
 
-        encrypted_private_key = ssh_manager.encrypt_private_key(private_key_pem, encryption_key)
+        encrypted_private_key = ssh_keys.encrypt_private_key(private_key_pem, encryption_key)
 
         root_key_name = f"root_{form.name.data}"
         new_root_key = SSHKey(
@@ -212,20 +233,60 @@ def add_server() -> Any:
     # ЭТАП 4: Развёртывание ключа на сервере (КРИТИЧНО!)
     try:
         logger.info(f"[ADD_SERVER] Развёртывание ключа на {ip_address}")
-        deploy_result = ssh_manager.deploy_key_with_password(
-            ip_address, port, username, password, public_key_ssh
-        )
 
-        # Очистка пароля из памяти
+        # Разворачиваем ключ через SSH
+        conn = SSHConnection(ip_address, port, username)
+        conn_success, conn_error = conn.connect_with_password(password)
+
+        # Удаляем пароль из памяти сразу после использования
         del password
 
-        if not deploy_result["success"]:
-            logger.warning(f"[ADD_SERVER_DEPLOY_FAILED] {deploy_result['message']}")
-            flash(f'Не удалось добавить ключ на сервер: {deploy_result["message"]}', "danger")
+        if not conn_success:
+            logger.warning(f"[ADD_SERVER_DEPLOY_FAILED] {conn_error}")
+            flash(f"Не удалось подключиться для развёртывания ключа: {conn_error}", "danger")
             db.session.rollback()
             return redirect(url_for("servers.servers"))
 
-        logger.info(f"[ADD_SERVER] Ключ успешно развёрнут на {ip_address}")
+        try:
+            # Валидация ключа
+            if not ssh_keys.validate_ssh_public_key(public_key_ssh):
+                flash("Невалидный формат публичного ключа", "danger")
+                db.session.rollback()
+                return redirect(url_for("servers.servers"))
+
+            # Шаг 1: Создаём .ssh директорию
+            cmd1_success, _, stderr1 = conn.execute(
+                "mkdir -p ~/.ssh && chmod 700 ~/.ssh", timeout=15
+            )
+            if not cmd1_success:
+                logger.error(f"[ADD_SERVER_MKDIR_FAILED] {stderr1}")
+                flash(f"Не удалось создать .ssh: {stderr1}", "danger")
+                db.session.rollback()
+                return redirect(url_for("servers.servers"))
+
+            # Шаг 2: Проверяем, не установлен ли уже ключ
+            cmd2_success, existing_keys, _ = conn.execute(
+                "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''", timeout=10
+            )
+            if public_key_ssh.strip() in existing_keys:
+                logger.info(f"[ADD_SERVER_KEY_EXISTS] Ключ уже установлен на {ip_address}")
+            else:
+                # Шаг 3: Добавляем ключ
+                escaped_key = public_key_ssh.strip().replace("'", "'\\''")
+                cmd3_success, _, stderr3 = conn.execute(
+                    f"echo '{escaped_key}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",  # noqa: E501
+                    timeout=15,
+                )
+
+                if not cmd3_success:
+                    logger.error(f"[ADD_SERVER_APPEND_FAILED] {stderr3}")
+                    flash(f"Не удалось добавить ключ: {stderr3}", "danger")
+                    db.session.rollback()
+                    return redirect(url_for("servers.servers"))
+
+            logger.info(f"[ADD_SERVER_DEPLOY_SUCCESS] Ключ успешно развёрнут на {ip_address}")
+        finally:
+            conn.close()
 
     except Exception as e:
         logger.error(f"[ADD_SERVER_ERROR] Ошибка развёртывания: {str(e)}")
@@ -570,19 +631,39 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             # Инициализация сервера
             try:
                 logger.info(f"[BULK_IMPORT] Инициализация {domain} ({ip_address}:{ssh_port})")
-                init_result = ssh_manager.initialize_server(
-                    ip_address, ssh_port, username, password
-                )
 
-                if not init_result["success"]:
-                    logger.warning(
-                        f'[BULK_IMPORT] Ошибка инициализации {domain}: {init_result.get("message")}'
-                    )
+                # Подключаемся и определяем версию OpenSSH
+                conn = SSHConnection(ip_address, ssh_port, username)
+                conn_success, conn_error = conn.connect_with_password(password)
+
+                if not conn_success:
+                    logger.warning(f"[BULK_IMPORT] {domain}: Ошибка подключения - {conn_error}")
                     failed += 1
                     continue
 
-                openssh_version = init_result.get("openssh_version", "unknown")
-                requires_legacy_ssh = init_result.get("requires_legacy_ssh", False)
+                try:
+                    # Определяем версию OpenSSH
+                    cmd_success, stdout, stderr = conn.execute("ssh -V 2>&1", timeout=10)
+                    if cmd_success and stdout:
+                        import re
+
+                        match = re.search(r"OpenSSH_(\S+)", stdout)
+                        openssh_version = match.group(1) if match else "unknown"
+                    else:
+                        openssh_version = "unknown"
+
+                    # Определяем, нужен ли legacy SSH
+                    try:
+                        version_parts = openssh_version.replace("p", ".").split(".")
+                        major = int(version_parts[0]) if version_parts else 0
+                        minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+                        requires_legacy_ssh = (major < 7) or (major == 7 and minor < 2)
+                    except (ValueError, IndexError):
+                        requires_legacy_ssh = False
+
+                finally:
+                    conn.close()
+
                 logger.info(
                     f"[BULK_IMPORT] {domain}: OpenSSH {openssh_version}, "
                     f"legacy={requires_legacy_ssh}"
@@ -610,15 +691,15 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     public_key_ssh = existing_key.public_key  # ✅ КЛЮЧЕВАЯ СТРОКА
                 else:
                     logger.info(f"[BULK_IMPORT] Генерация ключа для {domain}")
-                    private_key_pem, public_key_ssh = ssh_manager.generate_ssh_key("rsa")
-                    fingerprint = ssh_manager.get_fingerprint(public_key_ssh)
+                    private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key("rsa")
+                    fingerprint = ssh_keys.get_fingerprint(public_key_ssh)
 
                     if not fingerprint:
                         logger.error(f"[BULK_IMPORT] {domain}: не удалось получить fingerprint")
                         failed += 1
                         continue
 
-                    encrypted_private_key = ssh_manager.encrypt_private_key(
+                    encrypted_private_key = ssh_keys.encrypt_private_key(
                         private_key_pem, encryption_key
                     )
 
@@ -645,17 +726,59 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             # Развёртывание ключа (КРИТИЧНО!)
             try:
                 logger.info(f"[BULK_IMPORT] Развёртывание ключа на {domain}")
-                success, message = ssh_manager.add_key_to_authorized_keys(
-                    ip_address, ssh_port, username, password, public_key_ssh
-                )
 
-                if not success:
-                    logger.error(f"[BULK_IMPORT] Не удалось развернуть ключ на {domain}: {message}")
+                # Разворачиваем ключ через SSH
+                conn = SSHConnection(ip_address, ssh_port, username)
+                conn_success, conn_error = conn.connect_with_password(password)
+
+                if not conn_success:
+                    logger.error(f"[BULK_IMPORT] {domain}: Ошибка подключения - {conn_error}")
                     db.session.rollback()
                     failed += 1
                     continue
 
-                logger.info(f"[BULK_IMPORT] Ключ развёрнут на {domain}")
+                try:
+                    # Валидация ключа
+                    if not ssh_keys.validate_ssh_public_key(public_key_ssh):
+                        logger.error(f"[BULK_IMPORT] {domain}: Невалидный ключ")
+                        db.session.rollback()
+                        failed += 1
+                        continue
+
+                    # Создаём .ssh и добавляем ключ
+                    cmd1_success, _, stderr1 = conn.execute(
+                        "mkdir -p ~/.ssh && chmod 700 ~/.ssh", timeout=15
+                    )
+                    if not cmd1_success:
+                        logger.error(f"[BULK_IMPORT] {domain}: Ошибка создания .ssh - {stderr1}")
+                        db.session.rollback()
+                        failed += 1
+                        continue
+
+                    # Проверяем существование ключа
+                    cmd2_success, existing_keys, _ = conn.execute(
+                        "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''", timeout=10
+                    )
+
+                    if public_key_ssh.strip() not in existing_keys:
+                        # Добавляем ключ
+                        escaped_key = public_key_ssh.strip().replace("'", "'\\''")
+                        cmd3_success, _, stderr3 = conn.execute(
+                            f"echo '{escaped_key}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",  # noqa: E501
+                            timeout=15,
+                        )
+
+                        if not cmd3_success:
+                            logger.error(
+                                f"[BULK_IMPORT] {domain}: Ошибка добавления ключа - {stderr3}"
+                            )
+                            db.session.rollback()
+                            failed += 1
+                            continue
+
+                    logger.info(f"[BULK_IMPORT] {domain}: Ключ успешно развёрнут")
+                finally:
+                    conn.close()
 
             except Exception as e:
                 db.session.rollback()

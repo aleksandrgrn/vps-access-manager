@@ -17,6 +17,7 @@ from app import db
 from app.forms import GenerateKeyForm, UploadKeyForm
 from app.models import KeyDeployment, Server, SSHKey
 from app.services.key_service import decrypt_access_key, deploy_key_to_server
+from app.services.ssh import keys as ssh_keys
 from app.utils import add_log
 
 bp = Blueprint("keys", __name__)
@@ -67,8 +68,8 @@ def generate_key() -> Any:
 
     try:
         # Генерация ключа
-        private_key_pem, public_key_ssh = ssh_manager.generate_ssh_key(form.key_type.data)
-        fingerprint = ssh_manager.get_fingerprint(public_key_ssh)
+        private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key(form.key_type.data)
+        fingerprint = ssh_keys.get_fingerprint(public_key_ssh)
 
         if not fingerprint:
             flash("Не удалось вычислить fingerprint ключа.", "danger")
@@ -110,7 +111,7 @@ def generate_key() -> Any:
                 flash("ENCRYPTION_KEY не установлен на сервере", "danger")
                 return redirect(url_for("keys.keys"))
 
-            encrypted_private_key = ssh_manager.encrypt_private_key(private_key_pem, encryption_key)
+            encrypted_private_key = ssh_keys.encrypt_private_key(private_key_pem, encryption_key)
 
             # Создание нового ключа
             new_key = SSHKey(
@@ -155,12 +156,12 @@ def upload_key() -> Any:
         public_key = form.public_key.data.strip()
 
         # Валидация формата ключа
-        if not ssh_manager.validate_ssh_public_key(public_key):
+        if not ssh_keys.validate_ssh_public_key(public_key):
             flash("Неверный формат публичного ключа.", "danger")
             return redirect(url_for("keys.keys"))
 
         # Вычисление fingerprint
-        fingerprint = ssh_manager.get_fingerprint(public_key)
+        fingerprint = ssh_keys.get_fingerprint(public_key)
         if not fingerprint:
             flash("Не удалось вычислить fingerprint ключа.", "danger")
             return redirect(url_for("keys.keys"))
@@ -200,7 +201,7 @@ def upload_key() -> Any:
 
             # Создание пустого зашифрованного приватного ключа (его нет при загрузке)
             encryption_key = os.environ.get("ENCRYPTION_KEY")
-            empty_encrypted = ssh_manager.encrypt_private_key("", encryption_key)
+            empty_encrypted = ssh_keys.encrypt_private_key("", encryption_key)
 
             # Создание нового ключа
             new_key = SSHKey(

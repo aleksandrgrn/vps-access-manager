@@ -11,8 +11,9 @@ from typing import Any, Dict, List
 
 from cryptography.fernet import InvalidToken
 
-import ssh_manager
 from app.models import Server, SSHKey
+from app.services.ssh import keys as ssh_keys
+from app.services.ssh.connection import SSHConnection
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +70,7 @@ def decrypt_access_key(access_key: "SSHKey") -> Dict[str, Any]:
     # ЭТАП 4: Попытка расшифровки
     try:
         logger.debug(f"[DECRYPT_ATTEMPT] Расшифровка ключа {access_key.id}")
-        private_key = ssh_manager.decrypt_private_key(
-            access_key.private_key_encrypted, encryption_key
-        )
+        private_key = ssh_keys.decrypt_private_key(access_key.private_key_encrypted, encryption_key)
 
         # ЭТАП 5: Валидация результата
         if not private_key or len(private_key) < 100:
@@ -142,15 +141,102 @@ def revoke_key_from_single_server(
     )
 
     try:
-        # Вызов SSH операции с передачей server объекта
-        success, message, error_type = ssh_manager.revoke_key_detailed(
-            server_ip=server.ip_address,
-            ssh_port=server.ssh_port,
-            username=server.username,
-            private_key_str=private_key,
-            public_key=key_to_revoke.public_key,
-            server=server,  # ← ДОБАВЛЕНО для поддержки legacy SSH
-        )
+        # Валидация публичного ключа
+        from app.services.ssh.keys import validate_ssh_public_key
+
+        if not validate_ssh_public_key(key_to_revoke.public_key):
+            logger.error("[REVOKE_INVALID_KEY] Невалидный публичный ключ")
+            return {
+                "success": False,
+                "message": "Невалидный формат публичного ключа",
+                "details": f"Сервер: {server.name}",
+                "error_type": "invalid_key",
+            }
+
+        # Создаем SSH соединение
+        conn = SSHConnection(server.ip_address, server.ssh_port, server.username)
+        conn_success, conn_error = conn.connect_with_key(private_key, server)
+
+        if not conn_success:
+            logger.error(f"[REVOKE_CONNECTION_FAILED] {conn_error}")
+            return {
+                "success": False,
+                "message": conn_error or "Не удалось подключиться к серверу",
+                "details": f"Сервер: {server.name} ({server.ip_address}:{server.ssh_port})",
+                "error_type": "connection_failed",
+            }
+
+        try:
+            # Шаг 1: Создаем backup
+            logger.info(f"[REVOKE_BACKUP] Создание backup authorized_keys на {server.name}")
+            backup_success, _, backup_stderr = conn.execute(
+                "cp ~/.ssh/authorized_keys ~/.ssh/authorized_keys.bak 2>/dev/null || true",
+                timeout=10,
+            )
+
+            # Шаг 2: Читаем authorized_keys
+            read_success, content, read_stderr = conn.execute(
+                "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''", timeout=10
+            )
+            if not read_success or not content:
+                logger.info(f"[REVOKE_NO_FILE] authorized_keys не найден на {server.name}")
+                conn.close()
+                return {
+                    "success": True,
+                    "message": "authorized_keys не найден (ключ отсутствует)",
+                    "error_type": "SUCCESS",
+                }
+
+            # Шаг 3: Удаляем строку с ключом
+            lines = content.strip().split("\n")
+            key_to_revoke_stripped = key_to_revoke.public_key.strip()
+            original_line_count = len(lines)
+
+            new_lines = [
+                line for line in lines if line.strip() and key_to_revoke_stripped not in line
+            ]
+
+            if len(new_lines) == original_line_count:
+                logger.warning(
+                    f"[REVOKE_KEY_NOT_FOUND] Ключ не найден в authorized_keys на {server.name}"
+                )
+                conn.close()
+                return {
+                    "success": False,
+                    "message": "Ключ не найден в authorized_keys",
+                    "details": f"Сервер: {server.name}",
+                    "error_type": "KEY_NOT_FOUND",
+                }
+
+            # Шаг 4: Записываем новый authorized_keys
+            new_content = "\n".join(new_lines)
+            if new_content and not new_content.endswith("\n"):
+                new_content += "\n"
+
+            escaped_content = new_content.replace("'", "'\\''")
+            write_success, _, write_stderr = conn.execute(
+                f"echo -n '{escaped_content}' > ~/.ssh/authorized_keys && "
+                f"chmod 600 ~/.ssh/authorized_keys",
+                timeout=15,
+            )
+
+            if write_success:
+                logger.info(f"[REVOKE_SUCCESS] Ключ успешно удалён с {server.name}")
+                success = True
+                message = f"Ключ успешно отозван с сервера {server.name}"
+                error_type = None
+            else:
+                logger.error(f"[REVOKE_WRITE_FAILED] {write_stderr}")
+                # Пытаемся восстановить backup
+                conn.execute(
+                    "mv ~/.ssh/authorized_keys.bak ~/.ssh/authorized_keys 2>/dev/null || true",
+                    timeout=10,
+                )
+                success = False
+                message = f"Ошибка при записи authorized_keys: {write_stderr}"
+                error_type = "ssh_revoke_failed"
+        finally:
+            conn.close()
 
         if success:
             logger.info(f"[REVOKE_SSH_SUCCESS] Ключ успешно удалён с {server.name}")
@@ -268,14 +354,69 @@ def deploy_key_to_server(server: Server, private_key: str, key_to_deploy: SSHKey
     logger.info(f"[DEPLOY_START] Развёртывание ключа {key_to_deploy.name} на {server.name}")
 
     try:
-        success, message = ssh_manager.deploy_key(
-            ip=server.ip_address,
-            port=server.ssh_port,
-            username=server.username,
-            private_key_str=private_key,
-            public_key_to_deploy=key_to_deploy.public_key,
-            server=server,
-        )
+        # Валидация публичного ключа
+        from app.services.ssh.keys import validate_ssh_public_key
+
+        if not validate_ssh_public_key(key_to_deploy.public_key):
+            logger.error(f"[DEPLOY_FAILED] Невалидный публичный ключ: {key_to_deploy.name}")
+            return {
+                "success": False,
+                "message": "Невалидный формат публичного ключа",
+                "error_type": "invalid_key",
+            }
+
+        # Создаем SSH соединение
+        conn = SSHConnection(server.ip_address, server.ssh_port, server.username)
+        conn_success, conn_error = conn.connect_with_key(private_key, server)
+
+        if not conn_success:
+            logger.error(f"[DEPLOY_CONNECTION_FAILED] {conn_error}")
+            return {
+                "success": False,
+                "message": conn_error or "Не удалось подключиться к серверу",
+                "error_type": "connection_failed",
+            }
+
+        try:
+            # Шаг 1: Создаем .ssh директорию
+            cmd1_success, stdout1, stderr1 = conn.execute(
+                "mkdir -p ~/.ssh && chmod 700 ~/.ssh", timeout=15
+            )
+            if not cmd1_success:
+                logger.error(f"[DEPLOY_MKDIR_FAILED] {stderr1}")
+                return {
+                    "success": False,
+                    "message": f"Не удалось создать .ssh: {stderr1}",
+                    "error_type": "mkdir_failed",
+                }
+
+            # Шаг 2: Проверяем, не установлен ли уже ключ
+            cmd2_success, existing_keys, stderr2 = conn.execute(
+                "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''", timeout=10
+            )
+            if key_to_deploy.public_key.strip() in existing_keys:
+                logger.info(f"[DEPLOY_ALREADY_EXISTS] Ключ уже установлен на {server.name}")
+                conn.close()
+                return {"success": True, "message": f"Ключ уже установлен на {server.name}"}
+
+            # Шаг 3: Добавляем ключ через echo и append
+            escaped_key = key_to_deploy.public_key.strip().replace("'", "'\\''")
+            cmd3_success, stdout3, stderr3 = conn.execute(
+                f"echo '{escaped_key}' >> ~/.ssh/authorized_keys && "
+                f"chmod 600 ~/.ssh/authorized_keys",
+                timeout=15,
+            )
+
+            if cmd3_success:
+                logger.info(f"[DEPLOY_SUCCESS] Ключ развёрнут на {server.name}")
+                success = True
+                message = f"Ключ успешно развёрнут на {server.name}"
+            else:
+                logger.error(f"[DEPLOY_APPEND_FAILED] {stderr3}")
+                success = False
+                message = f"Ошибка при добавлении ключа: {stderr3}"
+        finally:
+            conn.close()
 
         if success:
             logger.info(f"[DEPLOY_SUCCESS] Ключ развёрнут на {server.name}")
@@ -317,13 +458,26 @@ def test_server_connection(server: Server, private_key: str) -> Dict[str, Any]:
         ssh_format = "modern"
 
     try:
-        success, message = ssh_manager.test_connection(
-            ip=server.ip_address,
-            port=server.ssh_port,
-            username=server.username,
-            private_key_str=private_key,
-            server=server,  # Передаем объект server для адаптивных алгоритмов
-        )
+        # Создаем SSH соединение с поддержкой legacy SSH
+        conn = SSHConnection(server.ip_address, server.ssh_port, server.username)
+        success, error = conn.connect_with_key(private_key, server)
+
+        if success:
+            # Проверяем соединение командой echo
+            try:
+                cmd_success, stdout, stderr = conn.execute("echo 'Connection test'", timeout=10)
+                if cmd_success:
+                    message = f"SSH соединение успешно (формат: {ssh_format})"
+                else:
+                    success = False
+                    message = f"Соединение установлено, но команда не выполнена: {stderr}"
+            except Exception as e:
+                success = False
+                message = f"Ошибка выполнения тестовой команды: {str(e)}"
+            finally:
+                conn.close()
+        else:
+            message = error or "Неизвестная ошибка подключения"
 
         if success:
             logger.info(
