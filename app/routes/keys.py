@@ -12,12 +12,12 @@ from typing import Any, Dict, Tuple
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-import ssh_manager
 from app import db
 from app.forms import GenerateKeyForm, UploadKeyForm
 from app.models import KeyDeployment, Server, SSHKey
-from app.services.key_service import decrypt_access_key, deploy_key_to_server
+from app.services.key_service import decrypt_access_key
 from app.services.ssh import keys as ssh_keys
+from app.services.ssh.operations import bulk_deploy_keys, deploy_key_to_server
 from app.utils import add_log
 
 bp = Blueprint("keys", __name__)
@@ -595,7 +595,7 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
             f"на {len(servers)} серверов"
         )
 
-        # Массовое развертывание через ssh_manager
+        # Массовое развертывание через ssh.operations
         encryption_key = os.environ.get("ENCRYPTION_KEY")
         if not encryption_key:
             return (
@@ -603,7 +603,22 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
                 500,
             )
 
-        results = ssh_manager.deploy_key_to_multiple_servers(key, servers, encryption_key)
+        # Подготовка серверов (расшифровка ключей)
+        for server in servers:
+            if server.access_key:
+                decrypt_result = decrypt_access_key(server.access_key)
+                if decrypt_result["success"]:
+                    server.private_key = decrypt_result["private_key"]
+                else:
+                    server.private_key = None
+                    logger.error(
+                        f"[BULK_DEPLOY] Ошибка расшифровки для {server.name}: "
+                        f"{decrypt_result['message']}"
+                    )
+            else:
+                server.private_key = None
+
+        results = bulk_deploy_keys(servers, [key.public_key])
 
         # Создать KeyDeployment ТОЛЬКО для успешных развертываний
         deployment_count = 0

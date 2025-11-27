@@ -1,150 +1,368 @@
-from unittest.mock import MagicMock, patch
+"""
+Тесты для модуля SSH Operations.
+Проверяет функции развёртывания, отзыва и верификации ключей.
+"""
+
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-# Импорт должен быть перед skip для корректной работы Flake8
-# Однако pytest.skip прервет выполнение, поэтому этот импорт никогда не выполнится
-try:
-    from app.services.ssh.operations import deploy_key, revoke_key
-except ImportError:
-    pass
-
-pytest.skip(
-    "Модуль app.services.ssh.operations отсутствует в текущей версии", allow_module_level=True
+from app.services.ssh.operations import (
+    bulk_deploy_keys,
+    deploy_key_to_server,
+    revoke_key_from_server,
+    verify_key_deployed,
 )
+
+# ==================== ФИКСТУРЫ ====================
 
 
 @pytest.fixture
-def mock_ssh_client():
-    client = MagicMock()
-    return client
+def mock_server():
+    """Мок объекта сервера."""
+    server = Mock()
+    server.name = "test-server"
+    server.ip_address = "192.168.1.100"
+    server.ssh_port = 22
+    server.username = "root"
+    server.requires_legacy_ssh = False
+    return server
 
 
-@patch("app.services.ssh.operations.connect_with_adaptive_algorithms")
-@patch("app.services.ssh.operations.validate_ssh_public_key")
-@patch("paramiko.RSAKey.from_private_key")
-@patch("flask.current_app", new_callable=MagicMock)
-def test_deploy_key_success(
-    mock_app, mock_rsa_key, mock_validate, mock_connect, mock_ssh_client, new_server, new_ssh_key
-):
-    """Test successful key deployment."""
-    # Setup mocks
-    mock_app.config.get.return_value = False  # Disable global mock for this test
-    mock_validate.return_value = True
-    mock_connect.return_value = mock_ssh_client
-    mock_rsa_key.return_value = MagicMock()
-
-    # Mock SFTP
-    mock_sftp = MagicMock()
-    mock_ssh_client.open_sftp.return_value = mock_sftp
-
-    # Mock authorized_keys reading (file not found initially, then success for write)
-    mock_file_handle = MagicMock()
-    mock_sftp.open.side_effect = [FileNotFoundError, mock_file_handle]
-
-    # Mock exec_command for mkdir
-    stdout_mock = MagicMock()
-    stdout_mock.channel.recv_exit_status.return_value = 0
-    mock_ssh_client.exec_command.return_value = (None, stdout_mock, MagicMock())
-
-    # Execute
-    dummy_private_key = (
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpQIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
-    )
-
-    success, message = deploy_key(
-        new_server.ip_address,
-        new_server.ssh_port,
-        new_server.username,
-        dummy_private_key,
-        new_ssh_key.public_key,
-        new_server,
-    )
-
-    # Verify
-    assert success is True
-    assert "успешно развернут" in message
-    mock_connect.assert_called_once()
-    mock_sftp.open.assert_called()  # Should try to open authorized_keys
+@pytest.fixture
+def valid_public_key():
+    """Валидный публичный SSH ключ."""
+    return "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC1234567890abcdef test@example.com"
 
 
-@patch("app.services.ssh.operations.connect_with_adaptive_algorithms")
-@patch("paramiko.RSAKey.from_private_key")
-@patch("flask.current_app", new_callable=MagicMock)
-def test_deploy_key_connection_failure(
-    mock_app, mock_rsa_key, mock_connect, new_server, new_ssh_key
-):
-    """Test deployment connection failure."""
-    # Setup mock to return None (connection failed)
-    mock_app.config.get.return_value = False  # Disable global mock for this test
-    mock_connect.return_value = None
-    mock_rsa_key.return_value = MagicMock()
-
-    dummy_private_key = (
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpQIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
-    )
-
-    # Execute
-    success, message = deploy_key(
-        new_server.ip_address,
-        new_server.ssh_port,
-        new_server.username,
-        dummy_private_key,
-        new_ssh_key.public_key,
-        new_server,
-    )
-
-    # Verify
-    assert success is False
-    # The actual error message might vary depending on how connect_with_adaptive_algorithms returns
-    # But deploy_key checks "if not client: return False, ..."
+@pytest.fixture
+def mock_connection():
+    """Мок SSH соединения."""
+    conn = MagicMock()
+    conn.execute = MagicMock()
+    return conn
 
 
-@patch("app.services.ssh.operations.connect_with_adaptive_algorithms")
-@patch("app.services.ssh.operations.validate_ssh_public_key")
-@patch("paramiko.RSAKey.from_private_key")
-@patch("flask.current_app", new_callable=MagicMock)
-def test_revoke_key_success(
-    mock_app, mock_rsa_key, mock_validate, mock_connect, mock_ssh_client, new_server, new_ssh_key
-):
-    """Test successful key revocation."""
-    # Setup mocks
-    mock_app.config.get.return_value = False  # Disable global mock for this test
-    mock_validate.return_value = True
-    mock_connect.return_value = mock_ssh_client
-    mock_rsa_key.return_value = MagicMock()
+# ==================== ТЕСТЫ DEPLOY_KEY_TO_SERVER ====================
 
-    # Mock SFTP
-    mock_sftp = MagicMock()
-    mock_ssh_client.open_sftp.return_value = mock_sftp
 
-    # Mock authorized_keys content
-    content = (
-        f"ssh-rsa AAAAB3NzaC1yc2E... old-key\n{new_ssh_key.public_key}\nssh-ed25519 ... another-key"
-    )
+class TestDeployKeyToServer:
+    """Тесты функции deploy_key_to_server."""
 
-    # Mock getfo (reading)
-    def side_effect_getfo(remotepath, flo):
-        flo.write(content.encode("utf-8"))
-        flo.seek(0)
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_deploy_key_success(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Успешное развёртывание ключа."""
+        # Настройка моков
+        mock_connection.execute.side_effect = [
+            (True, "", ""),  # mkdir -p ~/.ssh
+            (True, "", ""),  # cat authorized_keys (пустой файл)
+            (True, "", ""),  # echo >> authorized_keys
+        ]
 
-    mock_sftp.getfo.side_effect = side_effect_getfo
+        # Выполнение
+        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
 
-    dummy_private_key = (
-        "-----BEGIN RSA PRIVATE KEY-----\nMIIEpQIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
-    )
+        # Проверки
+        assert success is True
+        assert "успешно добавлен" in message.lower()
+        assert mock_connection.execute.call_count == 3
 
-    # Execute
-    result = revoke_key(
-        new_server.ip_address,
-        new_server.ssh_port,
-        new_server.username,
-        dummy_private_key,
-        new_ssh_key.public_key,
-        new_server,
-    )
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_deploy_key_already_exists(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ключ уже существует на сервере."""
+        # Настройка моков
+        mock_connection.execute.side_effect = [
+            (True, "", ""),  # mkdir -p ~/.ssh
+            (True, valid_public_key, ""),  # cat authorized_keys (ключ уже есть)
+        ]
 
-    # Verify
-    assert result["success"] is True
-    assert "успешно удален" in result["message"]
-    mock_sftp.putfo.assert_called()  # Should write back new content
+        # Выполнение
+        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert success is True
+        assert "уже установлен" in message.lower()
+        assert mock_connection.execute.call_count == 2
+
+    def test_deploy_key_invalid_key(self, mock_server, mock_connection):
+        """Попытка развернуть невалидный ключ."""
+        invalid_key = "invalid-key-format"
+
+        # Выполнение
+        success, message = deploy_key_to_server(mock_server, invalid_key, mock_connection)
+
+        # Проверки
+        assert success is False
+        assert "невалидный" in message.lower()
+        mock_connection.execute.assert_not_called()
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_deploy_key_mkdir_fails(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ошибка при создании директории .ssh."""
+        # Настройка моков
+        mock_connection.execute.return_value = (False, "", "Permission denied")
+
+        # Выполнение
+        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert success is False
+        assert "ошибка создания" in message.lower()
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_deploy_key_append_fails(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ошибка при добавлении ключа в authorized_keys."""
+        # Настройка моков
+        mock_connection.execute.side_effect = [
+            (True, "", ""),  # mkdir успешно
+            (True, "", ""),  # cat успешно (ключа нет)
+            (False, "", "Disk full"),  # echo fails
+        ]
+
+        # Выполнение
+        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert success is False
+        assert "ошибка добавления" in message.lower()
+
+
+# ==================== ТЕСТЫ REVOKE_KEY_FROM_SERVER ====================
+
+
+class TestRevokeKeyFromServer:
+    """Тесты функции revoke_key_from_server."""
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_revoke_key_success(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Успешный отзыв ключа."""
+        # Настройка моков
+        authorized_keys_content = f"{valid_public_key}\nssh-rsa AAAAB3NzaC2 another@key.com"
+        mock_connection.execute.side_effect = [
+            (True, "", ""),  # cp backup
+            (True, authorized_keys_content, ""),  # cat authorized_keys
+            (True, "", ""),  # echo > authorized_keys (обновление)
+        ]
+
+        # Выполнение
+        success, message = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert success is True
+        assert "успешно отозван" in message.lower()
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_revoke_key_not_found(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ключ не найден в authorized_keys."""
+        # Настройка моков
+        authorized_keys_content = "ssh-rsa AAAAB3NzaC2 another@key.com"
+        mock_connection.execute.side_effect = [
+            (True, "", ""),  # cp backup
+            (True, authorized_keys_content, ""),  # cat authorized_keys
+        ]
+
+        # Выполнение
+        success, message = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert success is False
+        assert "не найден" in message.lower()
+
+    def test_revoke_key_invalid_key(self, mock_server, mock_connection):
+        """Попытка отозвать невалидный ключ."""
+        invalid_key = "invalid-key-format"
+
+        # Выполнение
+        success, message = revoke_key_from_server(mock_server, invalid_key, mock_connection)
+
+        # Проверки
+        assert success is False
+        assert "невалидный" in message.lower()
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_revoke_key_write_fails_with_restore(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ошибка записи с восстановлением из backup."""
+        # Настройка моков
+        authorized_keys_content = f"{valid_public_key}\n"
+        mock_connection.execute.side_effect = [
+            (True, "", ""),  # cp backup успешно
+            (True, authorized_keys_content, ""),  # cat успешно
+            (False, "", "Write error"),  # echo fails
+            (True, "", ""),  # mv backup restore
+        ]
+
+        # Выполнение
+        success, message = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert success is False
+        assert "ошибка" in message.lower()
+
+
+# ==================== ТЕСТЫ VERIFY_KEY_DEPLOYED ====================
+
+
+class TestVerifyKeyDeployed:
+    """Тесты функции verify_key_deployed."""
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_verify_key_exists(self, mock_validate, mock_server, valid_public_key, mock_connection):
+        """Ключ найден на сервере."""
+        # Настройка моков
+        mock_connection.execute.return_value = (True, valid_public_key, "")
+
+        # Выполнение
+        result = verify_key_deployed(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert result is True
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_verify_key_not_exists(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ключ не найден на сервере."""
+        # Настройка моков
+        mock_connection.execute.return_value = (True, "ssh-rsa AAAAB3NzaC2 other@key", "")
+
+        # Выполнение
+        result = verify_key_deployed(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert result is False
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    def test_verify_key_execute_fails(
+        self, mock_validate, mock_server, valid_public_key, mock_connection
+    ):
+        """Ошибка выполнения команды."""
+        # Настройка моков
+        mock_connection.execute.return_value = (False, "", "Connection error")
+
+        # Выполнение
+        result = verify_key_deployed(mock_server, valid_public_key, mock_connection)
+
+        # Проверки
+        assert result is False
+
+
+# ==================== ТЕСТЫ BULK_DEPLOY_KEYS ====================
+
+
+class TestBulkDeployKeys:
+    """Тесты функции bulk_deploy_keys."""
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    @patch("app.services.ssh.operations.SSHConnection")
+    def test_bulk_deploy_success(
+        self, mock_ssh_connection_class, mock_validate, mock_server, valid_public_key
+    ):
+        """Успешное массовое развёртывание ключей."""
+        # Настройка моков
+        mock_conn = MagicMock()
+        mock_conn.connect_with_key.return_value = (True, None)
+        mock_conn.execute.side_effect = [
+            (True, "", ""),  # mkdir
+            (True, "", ""),  # cat
+            (True, "", ""),  # echo
+        ]
+        mock_ssh_connection_class.return_value = mock_conn
+
+        # Добавляем атрибут private_key для мок сервера
+        mock_server.private_key = "test-private-key"
+
+        servers = [mock_server]
+        keys = [valid_public_key]
+
+        # Выполнение
+        results = bulk_deploy_keys(servers, keys)
+
+        # Проверки
+        assert results["total"] == 1
+        assert len(results["deployed"]) == 1
+        assert len(results["failed"]) == 0
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    @patch("app.services.ssh.operations.SSHConnection")
+    def test_bulk_deploy_connection_fails(
+        self, mock_ssh_connection_class, mock_validate, mock_server, valid_public_key
+    ):
+        """Ошибка подключения при массовом развёртывании."""
+        # Настройка моков
+        mock_conn = MagicMock()
+        mock_conn.connect_with_key.return_value = (False, "Connection timeout")
+        mock_ssh_connection_class.return_value = mock_conn
+
+        mock_server.private_key = "test-private-key"
+
+        servers = [mock_server]
+        keys = [valid_public_key]
+
+        # Выполнение
+        results = bulk_deploy_keys(servers, keys)
+
+        # Проверки
+        assert results["total"] == 1
+        assert len(results["deployed"]) == 0
+        assert len(results["failed"]) == 1
+        assert "timeout" in results["failed"][0]["error"].lower()
+
+    @patch("app.services.ssh.operations.validate_ssh_public_key", return_value=True)
+    @patch("app.services.ssh.operations.SSHConnection")
+    def test_bulk_deploy_multiple_servers(
+        self, mock_ssh_connection_class, mock_validate, valid_public_key
+    ):
+        """Массовое развёртывание на несколько серверов."""
+        # Настройка моков
+        mock_conn = MagicMock()
+        mock_conn.connect_with_key.return_value = (True, None)
+        mock_conn.execute.side_effect = [
+            (True, "", ""),  # mkdir server1
+            (True, "", ""),  # cat server1
+            (True, "", ""),  # echo server1
+            (True, "", ""),  # mkdir server2
+            (True, "", ""),  # cat server2
+            (True, "", ""),  # echo server2
+        ]
+        mock_ssh_connection_class.return_value = mock_conn
+
+        # Создаём 2 сервера
+        server1 = Mock(
+            name="server1",
+            ip_address="192.168.1.1",
+            ssh_port=22,
+            username="root",
+            private_key="key1",
+        )
+        server2 = Mock(
+            name="server2",
+            ip_address="192.168.1.2",
+            ssh_port=22,
+            username="root",
+            private_key="key2",
+        )
+
+        servers = [server1, server2]
+        keys = [valid_public_key]
+
+        # Выполнение
+        results = bulk_deploy_keys(servers, keys)
+
+        # Проверки
+        assert results["total"] == 2
+        assert len(results["deployed"]) == 2
+        assert len(results["failed"]) == 0

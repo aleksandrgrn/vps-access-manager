@@ -104,7 +104,6 @@ def test_deploy_key_success(auth_client, new_server, new_ssh_key):
         )
 
 
-@pytest.mark.skip(reason="Требует рефакторинга SSH")
 def test_bulk_deploy_keys(auth_client, new_server, new_ssh_key):
     """Test bulk key deployment."""
     new_server.access_key = new_ssh_key
@@ -112,7 +111,11 @@ def test_bulk_deploy_keys(auth_client, new_server, new_ssh_key):
 
     db.session.commit()
 
-    with patch("app.services.ssh.deploy_key_to_multiple_servers") as mock_bulk:
+    with patch("app.routes.keys.bulk_deploy_keys") as mock_bulk, patch(
+        "app.routes.keys.decrypt_access_key"
+    ) as mock_decrypt:
+
+        mock_decrypt.return_value = {"success": True, "private_key": "priv"}
         mock_bulk.return_value = {
             "deployed": [{"server_id": new_server.id, "server_name": new_server.name}],
             "failed": [],
