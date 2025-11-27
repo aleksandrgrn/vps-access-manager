@@ -25,9 +25,9 @@ from flask_login import current_user, login_required
 from app import db
 from app.forms import ServerForm
 from app.models import KeyDeployment, Log, Server, SSHKey
-from app.services.key_service import decrypt_access_key, test_server_connection
 from app.services.ssh import keys as ssh_keys
 from app.services.ssh.connection import SSHConnection
+from app.services.ssh.server_manager import initialize_server, test_connection
 from app.utils import add_log
 
 bp = Blueprint("servers", __name__)
@@ -136,49 +136,22 @@ def add_server() -> Any:
 
     # ЭТАП 1: Инициализация сервера (определение версии OpenSSH)
     try:
-        logger.info(f"[ADD_SERVER] Инициализация сервера {ip_address}:{port}")
+        init_result = initialize_server(ip_address, port, username, password)
 
-        # Подключаемся и определяем версию OpenSSH
-        conn = SSHConnection(ip_address, port, username)
-        conn_success, conn_error = conn.connect_with_password(password)
-
-        if not conn_success:
-            flash(f"Ошибка подключения: {conn_error}", "danger")
-            add_log("add_server_failed", details={"ip": ip_address, "error": conn_error})
+        if not init_result["success"]:
+            flash(f"Ошибка инициализации: {init_result['message']}", "danger")
+            add_log(
+                "add_server_failed", details={"ip": ip_address, "error": init_result["message"]}
+            )
             return redirect(url_for("servers.servers"))
 
-        try:
-            # Определяем версию OpenSSH
-            cmd_success, stdout, stderr = conn.execute("ssh -V 2>&1", timeout=10)
-            if cmd_success and stdout:
-                import re
-
-                match = re.search(r"OpenSSH_(\S+)", stdout)
-                openssh_version = match.group(1) if match else "unknown"
-                logger.info(f"Определена версия OpenSSH: {openssh_version}")
-            else:
-                openssh_version = "unknown"
-                logger.warning(f"Не удалось определить версию OpenSSH: {stderr}")
-        finally:
-            conn.close()
-
-        # Определяем, нужен ли legacy SSH (OpenSSH < 7.2)
-        try:
-            version_parts = openssh_version.replace("p", ".").split(".")
-            major = int(version_parts[0]) if version_parts else 0
-            minor = int(version_parts[1]) if len(version_parts) > 1 else 0
-            requires_legacy_ssh = (major < 7) or (major == 7 and minor < 2)
-        except (ValueError, IndexError):
-            requires_legacy_ssh = False  # По умолчанию используем modern SSH
+        openssh_version = init_result["openssh_version"]
+        requires_legacy_ssh = init_result["requires_legacy_ssh"]
 
         # Переопределяем, если пользователь явно указал в форме
         if form.requires_legacy_ssh.data is not None:
             requires_legacy_ssh = form.requires_legacy_ssh.data
 
-        logger.info(
-            f"[ADD_SERVER] Сервер инициализирован. OpenSSH: {openssh_version}, "
-            f"Legacy: {requires_legacy_ssh}"
-        )
         flash(f"Сервер инициализирован. OpenSSH версия: {openssh_version}", "info")
 
     except Exception as e:
@@ -473,21 +446,8 @@ def test_server(server_id: int) -> Tuple[Dict[str, Any], int]:
                 400,
             )
 
-        # Расшифровка ключа
-        decrypt_result = decrypt_access_key(server.access_key)
-        if not decrypt_result["success"]:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": f'Ошибка расшифровки: {decrypt_result["message"]}',
-                    }
-                ),
-                500,
-            )
-
         # Тест соединения
-        test_result = test_server_connection(server, decrypt_result["private_key"])
+        test_result = test_connection(server)
 
         # Обновление статуса сервера
         server.status = "online" if test_result["success"] else "offline"
@@ -630,44 +590,17 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
 
             # Инициализация сервера
             try:
-                logger.info(f"[BULK_IMPORT] Инициализация {domain} ({ip_address}:{ssh_port})")
+                init_result = initialize_server(ip_address, ssh_port, username, password)
 
-                # Подключаемся и определяем версию OpenSSH
-                conn = SSHConnection(ip_address, ssh_port, username)
-                conn_success, conn_error = conn.connect_with_password(password)
-
-                if not conn_success:
-                    logger.warning(f"[BULK_IMPORT] {domain}: Ошибка подключения - {conn_error}")
+                if not init_result["success"]:
+                    logger.warning(
+                        f"[BULK_IMPORT] {domain}: Ошибка инициализации - {init_result['message']}"
+                    )
                     failed += 1
                     continue
 
-                try:
-                    # Определяем версию OpenSSH
-                    cmd_success, stdout, stderr = conn.execute("ssh -V 2>&1", timeout=10)
-                    if cmd_success and stdout:
-                        import re
-
-                        match = re.search(r"OpenSSH_(\S+)", stdout)
-                        openssh_version = match.group(1) if match else "unknown"
-                    else:
-                        openssh_version = "unknown"
-
-                    # Определяем, нужен ли legacy SSH
-                    try:
-                        version_parts = openssh_version.replace("p", ".").split(".")
-                        major = int(version_parts[0]) if version_parts else 0
-                        minor = int(version_parts[1]) if len(version_parts) > 1 else 0
-                        requires_legacy_ssh = (major < 7) or (major == 7 and minor < 2)
-                    except (ValueError, IndexError):
-                        requires_legacy_ssh = False
-
-                finally:
-                    conn.close()
-
-                logger.info(
-                    f"[BULK_IMPORT] {domain}: OpenSSH {openssh_version}, "
-                    f"legacy={requires_legacy_ssh}"
-                )
+                openssh_version = init_result["openssh_version"]
+                requires_legacy_ssh = init_result["requires_legacy_ssh"]
 
             except Exception as e:
                 logger.error(f"[BULK_IMPORT] Ошибка инициализации {domain}: {str(e)}")

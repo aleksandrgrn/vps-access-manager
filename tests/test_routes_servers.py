@@ -7,19 +7,19 @@ from app.models import Server
 
 @pytest.fixture
 def mock_ssh_init():
-    with patch("app.services.ssh.initialize_server") as mock:
+    with patch("app.services.ssh.server_manager.initialize_server") as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_ssh_keygen():
-    with patch("app.services.ssh.generate_ssh_key") as mock:
+    with patch("app.services.ssh.keys.generate_ssh_key") as mock:
         yield mock
 
 
 @pytest.fixture
 def mock_ssh_fingerprint():
-    with patch("app.services.ssh.get_fingerprint") as mock:
+    with patch("app.services.ssh.keys.get_fingerprint") as mock:
         yield mock
 
 
@@ -177,16 +177,14 @@ def test_test_server_connection_success(auth_client, new_server, new_ssh_key):
 
     db.session.commit()
 
-    with patch("app.routes.servers.test_server_connection") as mock_test:
+    with patch("app.routes.servers.test_connection") as mock_test:
         mock_test.return_value = {"success": True, "message": "Connected"}
-        with patch("app.routes.servers.decrypt_access_key") as mock_decrypt:
-            mock_decrypt.return_value = {"success": True, "private_key": "privkey"}
 
-            response = auth_client.post(f"/api/servers/test/{new_server.id}")
+        response = auth_client.post(f"/api/servers/test/{new_server.id}")
 
-            assert response.status_code == 200
-            assert response.json["success"] is True
-            assert response.json["status"] == "online"
+        assert response.status_code == 200
+        assert response.json["success"] is True
+        assert response.json["status"] == "online"
 
 
 @pytest.mark.skip(reason="Требует рефакторинга SSH")
