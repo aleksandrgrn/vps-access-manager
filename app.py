@@ -2,22 +2,12 @@ import ipaddress
 import json
 import os
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import click
-import requests
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
-from flask import (
-    Flask,
-    abort,
-    flash,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
-)
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import (
     LoginManager,
     UserMixin,
@@ -30,7 +20,7 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect, generate_csrf
-from werkzeug.exceptions import HTTPException, InternalServerError
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 from wtforms import (
     IntegerField,
@@ -42,7 +32,10 @@ from wtforms import (
 )
 from wtforms.validators import DataRequired, NumberRange
 
-import ssh_manager
+from app.services import deployment_service
+from app.services.ssh import keys as ssh_keys
+from app.services.ssh import operations, server_manager
+from app.services.ssh.connection import SSHConnection
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -358,7 +351,7 @@ def add_server_with_password():
         # 0. ИНИЦИАЛИЗИРОВАТЬ СЕРВЕР: определить версию OpenSSH
         try:
             app.logger.info(f"Инициализация сервера {ip_address}:{port}")
-            init_result = ssh_manager.initialize_server(ip_address, port, username, password)
+            init_result = server_manager.initialize_server(ip_address, port, username, password)
 
             if not init_result["success"]:
                 flash(f'Ошибка инициализации сервера: {init_result["message"]}', "danger")
@@ -368,7 +361,8 @@ def add_server_with_password():
             requires_legacy_ssh = init_result["requires_legacy_ssh"]
 
             app.logger.info(
-                f"Сервер инициализирован. OpenSSH версия: {openssh_version}, Legacy: {requires_legacy_ssh}"
+                f"Сервер инициализирован. OpenSSH версия: {openssh_version}, "
+                f"Legacy: {requires_legacy_ssh}"
             )
             flash(f"Сервер инициализирован. OpenSSH версия: {openssh_version}", "info")
 
@@ -379,8 +373,8 @@ def add_server_with_password():
 
         # 1. Сгенерировать уникальный ключ для этого сервера (root_domain.com)
         try:
-            private_key_pem, public_key_ssh = ssh_manager.generate_ssh_key("rsa")
-            fingerprint = ssh_manager.get_fingerprint(public_key_ssh)
+            private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key("rsa")
+            fingerprint = ssh_keys.get_fingerprint(public_key_ssh)
             if not fingerprint or SSHKey.query.filter_by(fingerprint=fingerprint).first():
                 flash("Не удалось сгенерировать уникальный ключ. Попробуйте еще раз.", "danger")
                 return redirect(url_for("servers"))
@@ -391,7 +385,7 @@ def add_server_with_password():
         # 2. Сохранить уникальный ключ в БД
         try:
             encryption_key = os.environ.get("ENCRYPTION_KEY")
-            encrypted_private_key = ssh_manager.encrypt_private_key(private_key_pem, encryption_key)
+            encrypted_private_key = ssh_keys.encrypt_private_key(private_key_pem, encryption_key)
 
             # Создаем уникальное имя ключа: root_domain.com
             root_key_name = f"root_{form.name.data}"
@@ -412,9 +406,23 @@ def add_server_with_password():
             return redirect(url_for("servers"))
 
         # 3. Развернуть публичный ключ на сервере через пароль
-        deploy_result = ssh_manager.deploy_key_with_password(
-            ip_address, port, username, password, public_key_ssh
-        )
+        deploy_result = {"success": False, "message": "Unknown error"}
+        conn = SSHConnection(ip_address, port, username)
+        try:
+            success, error = conn.connect_with_password(password)
+            if not success:
+                deploy_result = {"success": False, "message": error}
+            else:
+                # Создаем временный объект сервера для operations
+                temp_server = SimpleNamespace(name=form.name.data)
+                success, message = operations.deploy_key_to_server(
+                    temp_server, public_key_ssh, conn
+                )
+                deploy_result = {"success": success, "message": message}
+        except Exception as e:
+            deploy_result = {"success": False, "message": str(e)}
+        finally:
+            conn.close()
 
         # Очистка пароля из памяти
         del password
@@ -622,7 +630,7 @@ def bulk_import_servers():
             # 🔍 КРИТИЧНО: Инициализировать сервер - проверить OpenSSH версию!
             try:
                 app.logger.info(f"🔍 Инициализация сервера {domain} ({ip_address}:{ssh_port})...")
-                init_result = ssh_manager.initialize_server(
+                init_result = server_manager.initialize_server(
                     ip_address, ssh_port, username, password
                 )
 
@@ -647,8 +655,8 @@ def bulk_import_servers():
             # Создаем УНИКАЛЬНЫЙ ключ для этого сервера
             try:
                 app.logger.info(f"Генерирую уникальный ключ для {domain}")
-                private_key_pem, public_key_ssh = ssh_manager.generate_ssh_key("rsa")
-                fingerprint = ssh_manager.get_fingerprint(public_key_ssh)
+                private_key_pem, public_key_ssh = keys.generate_ssh_key("rsa")
+                fingerprint = keys.get_fingerprint(public_key_ssh)
 
                 if not fingerprint or SSHKey.query.filter_by(fingerprint=fingerprint).first():
                     app.logger.error(f"Не удалось сгенерировать уникальный ключ для {domain}")
@@ -656,9 +664,7 @@ def bulk_import_servers():
                     continue
 
                 # Шифруем приватный ключ
-                encrypted_private_key = ssh_manager.encrypt_private_key(
-                    private_key_pem, encryption_key
-                )
+                encrypted_private_key = keys.encrypt_private_key(private_key_pem, encryption_key)
 
                 # Создаем уникальное имя ключа: root_domain.com
                 root_key_name = f"root_{domain}"
@@ -683,9 +689,22 @@ def bulk_import_servers():
             # Развертываем ключ на сервер через пароль
             try:
                 app.logger.info(f"Развертываю ключ на {domain} ({ip_address}:{ssh_port})")
-                success, message = ssh_manager.add_key_to_authorized_keys(
-                    ip_address, ssh_port, username, password, public_key_ssh
-                )
+
+                success = False
+                message = "Unknown error"
+
+                conn = SSHConnection(ip_address, ssh_port, username)
+                try:
+                    conn_success, conn_error = conn.connect_with_password(password)
+                    if not conn_success:
+                        message = conn_error
+                    else:
+                        temp_server = SimpleNamespace(name=domain)
+                        success, message = operations.deploy_key_to_server(
+                            temp_server, public_key_ssh, conn
+                        )
+                finally:
+                    conn.close()
 
                 if not success:
                     app.logger.error(f"Не удалось развернуть ключ на {domain}: {message}")
@@ -716,7 +735,8 @@ def bulk_import_servers():
                 db.session.add(new_server)
                 db.session.flush()  # Получить ID сервера
                 app.logger.info(
-                    f"Создан сервер {domain} (ID: {new_server.id}), OpenSSH: {openssh_version}, Legacy: {requires_legacy_ssh}"
+                    f"Создан сервер {domain} (ID: {new_server.id}), "
+                    f"OpenSSH: {openssh_version}, Legacy: {requires_legacy_ssh}"
                 )
 
             except Exception as e:
@@ -793,8 +813,8 @@ def keys():
 def generate_key():
     form = GenerateKeyForm()
     if form.validate_on_submit():
-        private_key, public_key = ssh_manager.generate_ssh_key(form.key_type.data)
-        fingerprint = ssh_manager.get_fingerprint(public_key)
+        private_key, public_key = ssh_keys.generate_ssh_key(form.key_type.data)
+        fingerprint = ssh_keys.get_fingerprint(public_key)
 
         if not fingerprint or SSHKey.query.filter_by(fingerprint=fingerprint).first():
             flash("Не удалось сгенерировать уникальный ключ. Попробуйте еще раз.", "danger")
@@ -804,7 +824,7 @@ def generate_key():
         if not encryption_key:
             flash("Ошибка: ENCRYPTION_KEY не настроен в переменных окружения.", "danger")
             return redirect(url_for("keys"))
-        encrypted_private_key = ssh_manager.encrypt_private_key(private_key, encryption_key)
+        encrypted_private_key = ssh_keys.encrypt_private_key(private_key, encryption_key)
 
         new_key = SSHKey(
             name=form.name.data,
@@ -872,96 +892,25 @@ def deploy_key_route():
             )
             return jsonify({"success": False, "message": "Доступ запрещен"}), 403
 
-        # НАЙТИ УНИКАЛЬНЫЙ ключ для подключения: root_{server.name}
-        root_key_name = f"root_{server.name}"
-        access_key = SSHKey.query.filter_by(user_id=current_user.id, name=root_key_name).first()
+        # Использовать deployment_service для развертывания
+        result = deployment_service.deploy_key_to_servers(current_user.id, key_id, [server_id])
 
-        if not access_key:
-            app.logger.error(f"Root ключ не найден для сервера {server.name}")
+        if not result["success"]:
+            # Если общая ошибка (например, не найден ключ)
+            return jsonify({"success": False, "message": result["message"]}), 400
+
+        # Проверяем результат для конкретного сервера
+        if not result["results"]:
+            return jsonify({"success": False, "message": "Внутренняя ошибка: нет результата"}), 500
+
+        server_result = result["results"][0]
+        if server_result["success"]:
+            return jsonify({"success": True, "message": server_result["message"]})
+        else:
             return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": f"Root ключ не найден для сервера {server.name}. Создайте ключ {root_key_name} перед развертыванием.",
-                    }
-                ),
-                404,
-            )
-
-        # Расшифровать access key
-        encryption_key = os.environ.get("ENCRYPTION_KEY")
-        if not encryption_key:
-            app.logger.error("ENCRYPTION_KEY не установлен")
-            return jsonify({"success": False, "message": "Ошибка конфигурации сервера"}), 500
-
-        try:
-            app.logger.info(f"Расшифровка ключа доступа {access_key.name}...")
-            access_private_key = ssh_manager.decrypt_private_key(
-                access_key.private_key_encrypted, encryption_key
-            )
-
-            if not access_private_key:
-                app.logger.error("Расшифровка вернула None!")
-                return jsonify({"success": False, "message": "Ошибка расшифровки ключа"}), 500
-
-            app.logger.info(f"Ключ {access_key.name} успешно расшифрован")
-
-        except Exception as e:
-            app.logger.error(f"Ошибка при расшифровке ключа доступа: {str(e)}")
-            return (
-                jsonify({"success": False, "message": f"Ошибка расшифровки ключа: {str(e)}"}),
+                jsonify({"success": False, "message": server_result.get("error", "Unknown error")}),
                 500,
             )
-
-        # Развернуть ключ на сервер с адаптивными алгоритмами
-        try:
-            app.logger.info(
-                f"Развертывание {key_to_deploy.name} на {server.ip_address}:{server.ssh_port}"
-            )
-
-            success, message = ssh_manager.deploy_key(
-                server.ip_address,
-                server.ssh_port,
-                server.username,
-                access_private_key,
-                key_to_deploy.public_key,
-                server=server,  # Передаем объект server для адаптивных алгоритмов
-            )
-
-            if success:
-                app.logger.info(f"Ключ {key_to_deploy.name} успешно развернут на {server.name}")
-                add_log("deploy_key", target=key_to_deploy.name, details={"server": server.name})
-
-                # Создать KeyDeployment запись
-                existing = KeyDeployment.query.filter_by(
-                    ssh_key_id=key_id, server_id=server_id, revoked_at=None
-                ).first()
-
-                if not existing:
-                    deployment = KeyDeployment(
-                        ssh_key_id=key_id,
-                        server_id=server_id,
-                        deployed_by=current_user.id,
-                        deployed_at=datetime.now(timezone.utc),
-                    )
-                    db.session.add(deployment)
-                    db.session.commit()
-                    app.logger.info(
-                        f"Запись KeyDeployment создана для ключа {key_id} на сервере {server_id}"
-                    )
-                else:
-                    app.logger.info(
-                        f"Запись KeyDeployment уже существует для ключа {key_id} на сервере {server_id}"
-                    )
-
-            else:
-                app.logger.warning(f"Ошибка при развертывании ключа: {message}")
-
-            return jsonify({"success": success, "message": message})
-
-        except Exception as e:
-            app.logger.exception(f"Ошибка при развертывании ключа: {str(e)}")
-            return jsonify({"success": False, "message": f"Ошибка: {str(e)}"}), 500
 
     except Exception as e:
         error_msg = f"Внутренняя ошибка сервера: {str(e)}"
@@ -980,25 +929,17 @@ def test_server_connection(server_id):
         return jsonify(
             {
                 "success": False,
-                "message": "Для этого сервера не настроен ключ доступа. Пожалуйста, пересоздайте сервер.",
+                "message": (
+                    "Для этого сервера не настроен ключ доступа. "
+                    "Пожалуйста, пересоздайте сервер."
+                ),
             }
         )
 
-    access_key = server.access_key
-
-    encryption_key = os.environ.get("ENCRYPTION_KEY")
-    try:
-        private_key = ssh_manager.decrypt_private_key(
-            access_key.private_key_encrypted, encryption_key
-        )
-    except Exception:
-        return jsonify(
-            {"success": False, "message": "Не удалось дешифровать ключ доступа 'access_key'."}
-        )
-
-    success, message = ssh_manager.test_connection(
-        server.ip_address, server.ssh_port, server.username, private_key
-    )
+    # Использовать server_manager для тестирования (включает расшифровку)
+    result = server_manager.test_connection(server)
+    success = result["success"]
+    message = result["message"]
 
     # Обновляем статус сервера в БД
     server.status = "online" if success else "offline"
@@ -1100,233 +1041,23 @@ def revoke_key_api():
 
         app.logger.info(f"Starting revoke of key {ssh_key.id} from server {server.id}")
 
-        # Получить access key для подключения
-        access_key = server.access_key
+        # Использовать deployment_service для отзыва
+        result = deployment_service.revoke_deployment_by_id(current_user.id, deployment_id)
 
-        if not access_key:
-            root_key = SSHKey.query.filter_by(
-                name=f"root_{server.name}", user_id=current_user.id
-            ).first()
-
-            if not root_key:
-                app.logger.error(f"No root key found for server {server.name}")
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error_code": "NO_ROOT_KEY",
-                            "message": "Не найден root ключ для подключения к серверу",
-                        }
-                    ),
-                    400,
-                )
-
-            try:
-                # Расшифровать приватный ключ (root_key.private_key_encrypted хранит зашифрованные данные)
-                encryption_key = os.getenv("ENCRYPTION_KEY", "default-key")
-                private_key_decrypted = ssh_manager.decrypt_private_key(
-                    root_key.private_key_encrypted, encryption_key
-                )
-
-                # Использовать root ключ для удаления пользовательского ключа со сервера
-                success, message = ssh_manager.revoke_key(
-                    server.ip_address,
-                    server.ssh_port,
-                    "root",
-                    private_key_decrypted,
-                    ssh_key.public_key,
-                    server,
-                )
-
-                if success:
-                    deployment.revoked_at = datetime.now(timezone.utc)
-                    deployment.revoked_by = current_user.id
-                    db.session.commit()
-
-                    app.logger.info(f"Key {ssh_key.name} successfully revoked from {server.name}")
-                    add_log(
-                        "revoke_key",
-                        target=ssh_key.name,
-                        details={"server": server.name, "status": "revoked"},
-                    )
-
-                    return jsonify({"success": True, "message": "Ключ успешно удален"}), 200
-                else:
-                    app.logger.warning(f"Failed to revoke key from server: {message}")
-                    return jsonify({"success": False, "error": message}), 500
-
-            except Exception as e:
-                app.logger.error(f"Error revoking key: {str(e)}")
-                return (
-                    jsonify({"success": False, "error": f"Ошибка при отзыве ключа: {str(e)}"}),
-                    500,
-                )
-
-        # Расшифровать приватный ключ
-        encryption_key = os.environ.get("ENCRYPTION_KEY")
-        if not encryption_key:
+        if result["success"]:
+            return jsonify({"success": True, "message": result["message"]})
+        else:
+            # Возвращаем ошибку с кодом 500 или 400 в зависимости от типа
             return (
                 jsonify(
                     {
                         "success": False,
-                        "error_code": "ENCRYPTION_ERROR",
-                        "message": "Server configuration error",
-                        "details": {
-                            "problem": "Ошибка конфигурации сервера",
-                            "reasons": ["ENCRYPTION_KEY не установлен"],
-                            "solution": "Свяжитесь с администратором",
-                        },
+                        "message": result["message"],
+                        "details": result.get("details"),
                     }
                 ),
                 500,
             )
-
-        try:
-            access_private_key = ssh_manager.decrypt_private_key(
-                access_key.private_key_encrypted, encryption_key
-            )
-        except Exception as e:
-            app.logger.error(f"Failed to decrypt access key: {str(e)}")
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error_code": "DECRYPT_ERROR",
-                        "message": f"Failed to decrypt access key",
-                        "details": {
-                            "problem": "Не удалось расшифровать ключ доступа",
-                            "reasons": [str(e)],
-                            "solution": "Ключ доступа повреждён. Создайте новый ключ.",
-                        },
-                    }
-                ),
-                500,
-            )
-
-        # Удалить ключ с детальной диагностикой
-        try:
-            success, message, error_code = ssh_manager.revoke_key_detailed(
-                server.ip_address,
-                server.ssh_port,
-                server.username,
-                access_private_key,
-                ssh_key.public_key,
-            )
-
-            if not success:
-                # Вернуть ДЕТАЛИ ошибки
-                error_details = {
-                    "CONNECTION_TIMEOUT": {
-                        "problem": "Сервер не отвечает на подключение",
-                        "reasons": [
-                            "Сервер выключен или перезагружается",
-                            f"Неверный IP адрес ({server.ip_address})",
-                            "SSH порт закрыт в firewall",
-                            f"Неверный SSH порт (текущий: {server.ssh_port})",
-                            "Сетевая проблема между вашим сервером и VPS",
-                        ],
-                        "solution": "Проверьте IP адрес и SSH порт, убедитесь что сервер доступен",
-                    },
-                    "CONNECTION_ERROR": {
-                        "problem": "Ошибка подключения к серверу",
-                        "reasons": [
-                            "Сервер недоступен",
-                            "Проблемы с сетевым соединением",
-                            "Firewall блокирует подключение",
-                        ],
-                        "solution": "Проверьте доступность сервера и настройки firewall",
-                    },
-                    "AUTH_FAILED": {
-                        "problem": "Ошибка аутентификации на сервере",
-                        "reasons": [
-                            f'Пользователь "{server.username}" не существует на сервере',
-                            "SSH ключ не авторизован на сервере",
-                            "Ключ повреждён или неправильно расшифрован",
-                            "Проблемы с правами доступа на ~/.ssh",
-                        ],
-                        "solution": "Проверьте имя пользователя и убедитесь что access_key развёрнут на сервер",
-                    },
-                    "KEY_NOT_FOUND": {
-                        "problem": "Ключ не найден в authorized_keys",
-                        "reasons": [
-                            "Ключ уже был удален",
-                            "Ключ никогда не был развернут",
-                            "Файл authorized_keys был изменен вручную",
-                        ],
-                        "solution": "Ключ уже отозван. Можно безопасно удалить запись.",
-                    },
-                    "SSH_ERROR": {
-                        "problem": "Ошибка SSH команды",
-                        "reasons": [
-                            "Права доступа запрещают удаление файла",
-                            "Файл ~/.ssh/authorized_keys повреждён",
-                            "Недостаточно места на диске",
-                            "Проблемы с правами доступа",
-                        ],
-                        "solution": "Подключитесь к серверу вручную и проверьте ~/.ssh/authorized_keys",
-                    },
-                }
-
-                details = error_details.get(
-                    error_code,
-                    {
-                        "problem": message,
-                        "reasons": ["Неизвестная ошибка"],
-                        "solution": "Проверьте логи сервера",
-                    },
-                )
-
-                app.logger.warning(f"Failed to revoke key: {message} (error_code: {error_code})")
-
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error_code": error_code,
-                            "message": message,
-                            "details": details,
-                            "server_info": {
-                                "name": server.name,
-                                "ip": server.ip_address,
-                                "port": server.ssh_port,
-                                "username": server.username,
-                            },
-                        }
-                    ),
-                    500,
-                )
-
-        except Exception as ssh_error:
-            app.logger.error(f"SSH exception during key revoke: {str(ssh_error)}")
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error_code": "SSH_EXCEPTION",
-                        "message": str(ssh_error),
-                        "details": {
-                            "problem": "Критическая ошибка SSH соединения",
-                            "reasons": [str(ssh_error)],
-                            "solution": "Проверьте консоль приложения для полных логов ошибки",
-                        },
-                    }
-                ),
-                500,
-            )
-
-        # Успех - отметить как revoked в БД
-        deployment.revoked_at = datetime.now(timezone.utc)
-        deployment.revoked_by = current_user.id
-        db.session.commit()
-
-        add_log("revoke_key", target=ssh_key.name, details={"server": server.name})
-
-        return jsonify(
-            {
-                "success": True,
-                "message": f"✅ Key {ssh_key.name} successfully revoked from {server.name}",
-            }
-        )
 
     except Exception as e:
         app.logger.exception(f"Unexpected error in revoke_key_api: {str(e)}")
@@ -1351,7 +1082,6 @@ def revoke_key_all():
             'servers': [{'name': str, 'status': 'success'|'failed', 'message': str}]
         }
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     try:
         data = request.get_json()
@@ -1386,186 +1116,25 @@ def revoke_key_all():
 
         app.logger.info(f"Начинаем отзыв ключа {ssh_key.name} со {len(deployments)} серверов")
 
-        # Получаем ключ шифрования
-        encryption_key = os.environ.get("ENCRYPTION_KEY")
-        if not encryption_key:
-            app.logger.error("ENCRYPTION_KEY не установлен")
-            return jsonify({"success": False, "message": "Ошибка конфигурации сервера"}), 500
+        # Использовать deployment_service для глобального отзыва
+        result = deployment_service.revoke_key_globally(current_user.id, ssh_key_id)
 
-        # Сохраняем ID пользователя для использования в потоках
-        user_id = current_user.id
-        ssh_key_id = ssh_key.id
-        ssh_key_name = ssh_key.name
-        ssh_key_public = ssh_key.public_key
-
-        # Обёртка для выполнения в контексте приложения
-        def revoke_from_server_wrapper(deployment):
-            """Обёртка для выполнения в контексте приложения"""
-            with app.app_context():
-                try:
-                    # Получить данные развертывания
-                    deployment = KeyDeployment.query.get(deployment.id)
-                    if not deployment:
-                        return {
-                            "server_id": None,
-                            "server_name": "Unknown",
-                            "success": False,
-                            "message": "Deployment not found",
-                        }
-
-                    ssh_key_obj = deployment.ssh_key
-                    server = deployment.server
-
-                    if not server:
-                        return {
-                            "server_id": deployment.server_id,
-                            "server_name": "Unknown",
-                            "success": False,
-                            "message": "Сервер не найден",
-                        }
-
-                    # Поиск root ключа
-                    root_key_name = f"root_{server.name}"
-                    root_key = SSHKey.query.filter_by(name=root_key_name, user_id=user_id).first()
-
-                    if not root_key:
-                        app.logger.warning(f"Root ключ не найден для сервера {server.name}")
-                        return {
-                            "server_id": server.id,
-                            "server_name": server.name,
-                            "success": False,
-                            "message": "Root ключ не найден",
-                        }
-
-                    # Расшифровка приватного ключа
-                    try:
-                        private_key_decrypted = ssh_manager.decrypt_private_key(
-                            root_key.private_key_encrypted, encryption_key
-                        )
-                    except Exception as e:
-                        app.logger.error(
-                            f"Ошибка при расшифровке root ключа для {server.name}: {str(e)}"
-                        )
-                        return {
-                            "server_id": server.id,
-                            "server_name": server.name,
-                            "success": False,
-                            "message": "Ошибка расшифровки ключа",
-                        }
-
-                    # Отзыв ключа
-                    try:
-                        app.logger.info(f"Отзываем ключ {ssh_key_name} с сервера {server.name}")
-                        result = ssh_manager.revoke_key(
-                            server.ip_address,
-                            server.ssh_port,
-                            server.username,
-                            private_key_decrypted,
-                            ssh_key_public,
-                            server,
-                        )
-
-                        success = result.get("success", False)
-                        message = result.get("message", "Неизвестная ошибка")
-
-                        if success:
-                            # Обновляем deployment в БД
-                            deployment.revoked_at = datetime.now(timezone.utc)
-                            deployment.revoked_by = user_id
-                            db.session.commit()
-
-                            app.logger.info(f"Ключ {ssh_key_name} успешно отозван с {server.name}")
-                            add_log(
-                                "revoke_key_all",
-                                target=ssh_key_name,
-                                details={"server": server.name, "status": "success"},
-                            )
-
-                            return {
-                                "server_id": server.id,
-                                "server_name": server.name,
-                                "success": True,
-                                "message": "Успешно отозван",
-                            }
-                        else:
-                            app.logger.warning(
-                                f"Ошибка при отзыве ключа с {server.name}: {message}"
-                            )
-                            add_log(
-                                "revoke_key_all_failed",
-                                target=ssh_key_name,
-                                details={"server": server.name, "error": message},
-                            )
-
-                            return {
-                                "server_id": server.id,
-                                "server_name": server.name,
-                                "success": False,
-                                "message": message,
-                            }
-
-                    except Exception as e:
-                        app.logger.error(f"Исключение при отзыве ключа с {server.name}: {str(e)}")
-                        return {
-                            "server_id": server.id,
-                            "server_name": server.name,
-                            "success": False,
-                            "message": f"Ошибка: {str(e)}",
-                        }
-
-                except Exception as e:
-                    app.logger.error(f"Неожиданная ошибка в revoke_from_server_wrapper: {str(e)}")
-                    return {
-                        "server_id": None,
-                        "server_name": "Unknown",
-                        "success": False,
-                        "message": f"Ошибка: {str(e)}",
-                    }
-
-        # Параллельно отзываем ключ со всех серверов (max 5 одновременно)
-        results = []
-        completed = 0
-        failed = 0
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(revoke_from_server_wrapper, dep): dep for dep in deployments}
-
-            for future in as_completed(futures):
-                try:
-                    result = future.result(timeout=30)
-                    results.append(result)
-
-                    if result["success"]:
-                        completed += 1
-                    else:
-                        failed += 1
-
-                    app.logger.debug(f'Результат для {result["server_name"]}: {result["success"]}')
-
-                except Exception as e:
-                    app.logger.error(f"Ошибка при выполнении задачи: {str(e)}")
-                    failed += 1
-                    results.append(
-                        {
-                            "server_id": None,
-                            "server_name": "Unknown",
-                            "success": False,
-                            "message": f"Ошибка выполнения: {str(e)}",
-                        }
-                    )
-
-        app.logger.info(f"Отзыв ключа завершен. Успешно: {completed}, Ошибок: {failed}")
-
-        return jsonify(
-            {
-                "success": True,
-                "message": f"Отзыв завершен. Успешно: {completed}, Ошибок: {failed}",
-                "total": len(deployments),
-                "completed": completed,
-                "failed": failed,
-                "servers": results,
-            }
-        )
+        # Adapt response to match frontend expectation
+        response = {
+            "success": result["success"],
+            "total": result.get("total", 0),
+            "completed": result.get("completed", 0),
+            "failed": result.get("failed", 0),
+            "servers": [
+                {
+                    "name": r["server_name"],
+                    "status": "success" if r["success"] else "failed",
+                    "message": r["message"],
+                }
+                for r in result.get("results", [])
+            ],
+        }
+        return jsonify(response)
 
     except Exception as e:
         app.logger.exception(f"Ошибка в revoke_key_all: {str(e)}")
@@ -1579,116 +1148,24 @@ def revoke_key_deployment():
     key_id = data.get("key_id")
     server_id = data.get("server_id")
 
-    key_to_revoke = SSHKey.query.get_or_404(key_id)
-    if key_to_revoke.user_id != current_user.id:
-        abort(403)
+    if not key_id:
+        return jsonify({"success": False, "message": "key_id is required"}), 400
 
     # Сценарий 1: Отозвать со всех серверов
     if server_id is None:
-        servers_with_key = (
-            Server.query.join(KeyDeployment)
-            .filter(
-                KeyDeployment.ssh_key_id == key_id,
-                KeyDeployment.revoked_at.is_(None),
-                Server.user_id == current_user.id,
-            )
-            .all()
-        )
-
-        if not servers_with_key:
-            return jsonify(
-                {"success": True, "message": "Ключ не был развернут ни на одном сервере."}
-            )
-
-        encryption_key = os.environ.get("ENCRYPTION_KEY")
-        if not encryption_key:
-            return jsonify({"success": False, "message": "Ключ шифрования не настроен."}), 500
-
-        user_credentials = {"encryption_key": encryption_key}
-
-        report = ssh_manager.revoke_key_from_all_servers(
-            key_to_revoke.public_key, servers_with_key, user_credentials
-        )
-
-        # Обновляем БД для успешно отозванных ключей
-        for sid in report["success"]:
-            deployment = KeyDeployment.query.filter_by(
-                ssh_key_id=key_id, server_id=sid, revoked_at=None
-            ).first()
-            if deployment:
-                deployment.revoked_at = db.func.now()
-                deployment.revoked_by = current_user.id
-                add_log(
-                    "revoke_key",
-                    target=key_to_revoke.name,
-                    details={"server_id": sid, "result": "success"},
-                )
-        db.session.commit()
-
-        return jsonify({"success": True, **report})
+        result = deployment_service.revoke_key_globally(current_user.id, key_id)
+        return jsonify({"success": result["success"], "message": result["message"]})
 
     # Сценарий 2: Отозвать с одного сервера
     else:
-        server = Server.query.get_or_404(server_id)
-        if server.user_id != current_user.id:
-            abort(403)
+        result = deployment_service.revoke_key_from_server_by_ids(
+            current_user.id, key_id, server_id
+        )
 
-        deployment = KeyDeployment.query.filter_by(
-            ssh_key_id=key_id, server_id=server_id, revoked_at=None
-        ).first()
-
-        if not deployment:
-            return jsonify({"success": False, "message": "Активное развертывание не найдено."}), 404
-
-        access_key = server.access_key
-        if not access_key:
-            return (
-                jsonify({"success": False, "message": "Ключ доступа для сервера не найден."}),
-                500,
-            )
-
-        try:
-            encryption_key = os.environ.get("ENCRYPTION_KEY")
-            private_key = ssh_manager.decrypt_private_key(
-                access_key.private_key_encrypted, encryption_key
-            )
-
-            # Используем новую функцию revoke_key() с адаптивными алгоритмами
-            # Передаем объект server для использования connect_with_adaptive_algorithms()
-            result = ssh_manager.revoke_key(
-                server.ip_address,
-                server.ssh_port,
-                server.username,
-                private_key,
-                key_to_revoke.public_key,
-                server,  # Передаем объект server для адаптивных алгоритмов
-            )
-
-            if result["success"]:
-                deployment.revoked_at = db.func.now()
-                deployment.revoked_by = current_user.id
-                db.session.commit()
-                add_log(
-                    "revoke_key",
-                    target=key_to_revoke.name,
-                    details={
-                        "server": server.name,
-                        "result": "success",
-                        "openssh_version": server.openssh_version,
-                    },
-                )
-                return jsonify({"success": True, "message": "Ключ успешно отозван."})
-            else:
-                add_log(
-                    "revoke_key_failed",
-                    target=key_to_revoke.name,
-                    details={"server": server.name, "error": result["message"]},
-                )
-                return jsonify({"success": False, "message": result["message"]})
-
-        except Exception as e:
-            logger.error(f"Ошибка при отзыве ключа: {str(e)}")
-            return jsonify({"success": False, "message": f"Внутренняя ошибка: {str(e)}"}), 500
+        if result["success"]:
+            return jsonify({"success": True, "message": result["message"]})
+        else:
+            return jsonify({"success": False, "message": result["message"]}), 500
 
 
 @app.route("/key-deployments/track", methods=["POST"])

@@ -194,7 +194,9 @@ vps-access-manager/
 │   │   ├── keys.py         # SSH ключи
 │   │   └── deployments.py  # Развертывания
 │   └── services/           # Бизнес-логика
-│       └── key_service.py  # SSH операции
+│       ├── deployment_service.py
+│       ├── key_service.py
+│       └── ssh/            # SSH модуль
 ├── run.py                  # Точка входа ⭐
 ├── init_db.py              # Инициализация БД
 └── seed_db.py              # Тестовые данные
