@@ -178,6 +178,29 @@
           </div>
           <small id="revokeAllProgressText" class="text-muted">Инициализация...</small>
         </div>
+
+        <!-- Результаты отзыва -->
+        <div id="revokeResults" class="mt-3" style="display:none;">
+          <h6>📊 Результаты отзыва ключа:</h6>
+
+          <!-- Успешно отозвано -->
+          <div class="alert alert-success" id="revokedList" style="display:none;">
+            <strong>✅ Успешно отозвано (<span id="revokedCount">0</span>):</strong>
+            <ul id="revokedServers" class="mb-0 mt-2"></ul>
+          </div>
+
+          <!-- Пропущено (ключ не найден) -->
+          <div class="alert alert-info" id="skippedRevokeList" style="display:none;">
+            <strong>⏭️ Пропущено (ключ не найден) (<span id="skippedRevokeCount">0</span>):</strong>
+            <ul id="skippedRevokeServers" class="mb-0 mt-2"></ul>
+          </div>
+
+          <!-- Ошибки отзыва -->
+          <div class="alert alert-danger" id="failedRevokeList" style="display:none;">
+            <strong>❌ Ошибки отзыва (<span id="failedRevokeCount">0</span>):</strong>
+            <ul id="failedRevokeServers" class="mb-0 mt-2"></ul>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="revokeAllCancelBtn">Отмена</button>
@@ -788,6 +811,18 @@
     revokeAllKeyId = keyId;
     document.getElementById('revokeAllKeyName').textContent = keyName;
 
+    // Сбрасываем предыдущие результаты
+    document.getElementById('revokeResults').style.display = 'none';
+    document.getElementById('revokeAllProgress').style.display = 'none';
+
+    // Восстанавливаем кнопки
+    const confirmBtn = document.getElementById('revokeAllConfirmBtn');
+    const cancelBtn = document.getElementById('revokeAllCancelBtn');
+    confirmBtn.style.display = '';
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = 'Отмена';
+
     // Получаем список серверов где развернут ключ
     fetchServersWithKey(keyId);
 
@@ -820,6 +855,60 @@
       console.error('Ошибка при получении серверов:', error);
       const serversList = document.getElementById('revokeAllServersList');
       serversList.innerHTML = '<li class="text-danger">Ошибка при загрузке списка серверов</li>';
+    }
+  }
+
+  // Функция отображения детальных результатов отзыва
+  function displayRevokeResults(result) {
+    const resultsDiv = document.getElementById('revokeResults');
+    resultsDiv.style.display = 'block';
+
+    // Очистка предыдущих результатов
+    const revokedUl = document.getElementById('revokedServers');
+    const skippedUl = document.getElementById('skippedRevokeServers');
+    const failedUl = document.getElementById('failedRevokeServers');
+
+    revokedUl.innerHTML = '';
+    skippedUl.innerHTML = '';
+    failedUl.innerHTML = '';
+
+    // 1. Успешно отозванные
+    if (result.revoked && result.revoked.length > 0) {
+      document.getElementById('revokedList').style.display = 'block';
+      document.getElementById('revokedCount').textContent = result.revoked.length;
+      result.revoked.forEach(server => {
+        const li = document.createElement('li');
+        li.textContent = `${server.server_name} (${server.server_ip})`;
+        revokedUl.appendChild(li);
+      });
+    } else {
+      document.getElementById('revokedList').style.display = 'none';
+    }
+
+    // 2. Пропущенные
+    if (result.skipped && result.skipped.length > 0) {
+      document.getElementById('skippedRevokeList').style.display = 'block';
+      document.getElementById('skippedRevokeCount').textContent = result.skipped.length;
+      result.skipped.forEach(server => {
+        const li = document.createElement('li');
+        li.textContent = `${server.server_name} (${server.server_ip}) - ${server.reason}`;
+        skippedUl.appendChild(li);
+      });
+    } else {
+      document.getElementById('skippedRevokeList').style.display = 'none';
+    }
+
+    // 3. Ошибки
+    if (result.failed && result.failed.length > 0) {
+      document.getElementById('failedRevokeList').style.display = 'block';
+      document.getElementById('failedRevokeCount').textContent = result.failed.length;
+      result.failed.forEach(server => {
+        const li = document.createElement('li');
+        li.textContent = `${server.server_name} (${server.server_ip}) - ${server.error}`;
+        failedUl.appendChild(li);
+      });
+    } else {
+      document.getElementById('failedRevokeList').style.display = 'none';
     }
   }
 
@@ -857,23 +946,23 @@
 
       const data = await response.json();
 
+      // Отладка: выводим полный ответ сервера
+      console.log('[REVOKE_RESULT] Full response:', data);
+      console.log('[REVOKE_RESULT] Revoked:', data.revoked);
+      console.log('[REVOKE_RESULT] Skipped:', data.skipped);
+      console.log('[REVOKE_RESULT] Failed:', data.failed);
+
       if (data.success) {
-        // Обновляем прогресс-бар
-        const percent = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 100;
-        progressBar.style.width = percent + '%';
-        progressText.textContent = `Завершено: ${data.completed}/${data.total}, Ошибок: ${data.failed}`;
+        // Скрываем прогресс
+        progressDiv.style.display = 'none';
 
-        // Показываем результат
-        setTimeout(() => {
-          alert(`✅ Ключ успешно отозван со всех серверов!\n\nВсего: ${data.total}\nУспешно: ${data.completed}\nОшибок: ${data.failed}`);
+        // Показываем детальные результаты
+        displayRevokeResults(data);
 
-          if (revokeAllModal) {
-            revokeAllModal.hide();
-          }
-
-          // Перезагружаем страницу через 1 сек
-          setTimeout(() => location.reload(), 1000);
-        }, 500);
+        // Включаем кнопки обратно (кроме подтверждения - операция завершена)
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = 'Закрыть';
+        confirmBtn.style.display = 'none'; // Скрываем кнопку подтверждения
       } else {
         throw new Error(data.message || 'Неизвестная ошибка');
       }

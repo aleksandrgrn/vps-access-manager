@@ -213,10 +213,11 @@ def revoke_key_all() -> Tuple[Dict[str, Any], int]:
     Returns:
         JSON: {
             'success': bool,
-            'message': str,
+            'revoked': List[Dict],  # Успешно отозванные
+            'skipped': List[Dict],  # Пропущенные (ключ не найден)
+            'failed': List[Dict],   # Ошибки отзыва
             'total': int,
-            'completed': int,
-            'failed': int
+            'message': str
         }
     """
     try:
@@ -234,6 +235,9 @@ def revoke_key_all() -> Tuple[Dict[str, Any], int]:
 
         logger.info(f"[REVOKE_ALL_START] ssh_key_id={ssh_key_id}")
 
+        # Получаем список deployments для маппинга server_name -> server
+        deployments = KeyDeployment.query.filter_by(ssh_key_id=ssh_key_id, revoked_at=None).all()
+
         # Вызов сервиса
         result = deployment_service.revoke_key_globally(current_user.id, ssh_key_id)
 
@@ -249,12 +253,71 @@ def revoke_key_all() -> Tuple[Dict[str, Any], int]:
         else:
             status_code = 200
 
-        logger.info(
-            f"[REVOKE_ALL_SUCCESS] Result: {result.get('completed', 0)}/"
-            f"{result.get('total', 0)} servers"
-        )
+        # Разделяем результаты на категории для детального отображения в UI
+        revoked = []
+        skipped = []
+        failed = []
 
-        return jsonify(result), status_code
+        # Получаем mapping server_name -> server для доступа к server_id и ip_address
+        server_map = {}
+        for deployment in deployments:
+            server = Server.query.get(deployment.server_id)
+            if server:
+                server_map[server.name] = server
+
+        # Классифицируем результаты
+        for r in result.get("results", []):
+            server_name = r["server_name"]
+            server_obj = server_map.get(server_name)
+
+            # Базовая информация о сервере
+            server_info = {
+                "server_id": server_obj.id if server_obj else None,
+                "server_name": server_name,
+                "server_ip": server_obj.ip_address if server_obj else r.get("server_ip", "unknown"),
+            }
+
+            if r["success"]:
+                # Успешно отозван
+                revoked.append(server_info)
+            else:
+                # Проверяем причину неудачи
+                message = r["message"].lower()
+                # Если ключ не найден/отсутствует - это "пропущено"
+                if "не найден" in message or "отсутствует" in message or "not found" in message:
+                    skipped.append({**server_info, "reason": r["message"]})
+                else:
+                    # Все остальные ошибки - это "failed"
+                    failed.append({**server_info, "error": r["message"]})
+
+        # Формируем сообщение
+        parts = []
+        if revoked:
+            parts.append(f"Отозвано: {len(revoked)}")
+        if skipped:
+            parts.append(f"Пропущено: {len(skipped)}")
+        if failed:
+            parts.append(f"Ошибок: {len(failed)}")
+
+        message = ", ".join(parts) if parts else "Нет результатов"
+
+        response = {
+            "success": result["success"],
+            "revoked": revoked,
+            "skipped": skipped,
+            "failed": failed,
+            "total": result.get("total", 0),
+            "message": message,
+        }
+
+        # Отладка: логируем финальный ответ
+        logger.info(
+            f"[REVOKE_RESPONSE] revoked={len(revoked)}, skipped={len(skipped)}, "
+            f"failed={len(failed)}, total={result.get('total', 0)}"
+        )
+        logger.debug(f"[REVOKE_RESPONSE] Full response: {response}")
+
+        return jsonify(response), status_code
 
     except Exception as critical_error:
         logger.error(f"[REVOKE_ALL_CRITICAL] {str(critical_error)}")
