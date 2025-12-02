@@ -17,7 +17,7 @@ from app.forms import GenerateKeyForm, UploadKeyForm
 from app.models import KeyDeployment, Server, SSHKey
 from app.services.key_service import decrypt_access_key
 from app.services.ssh import keys as ssh_keys
-from app.services.ssh.operations import bulk_deploy_keys, deploy_key_to_server
+from app.services.ssh.operations import bulk_deploy_keys
 from app.utils import add_log
 
 bp = Blueprint("keys", __name__)
@@ -313,22 +313,12 @@ def deploy_key() -> Tuple[Dict[str, Any], int]:
                 400,
             )
 
-        # Расшифровка access_key
-        decrypt_result = decrypt_access_key(server.access_key)
-        if not decrypt_result["success"]:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": f'Ошибка расшифровки: {decrypt_result["message"]}',
-                        "error_type": decrypt_result.get("error_type"),
-                    }
-                ),
-                500,
-            )
+        # КРИТИЧНО! Используем новый сервис deployment_service
+        from app.services.deployment_service import deploy_key_to_servers
 
-        # SSH развёртывание (КРИТИЧНО!)
-        deploy_result = deploy_key_to_server(server, decrypt_result["private_key"], key_to_deploy)
+        deploy_result = deploy_key_to_servers(
+            user_id=current_user.id, key_id=key_id, server_ids=[server_id]
+        )
 
         if not deploy_result["success"]:
             logger.warning(f"[DEPLOY_KEY_FAILED] {deploy_result['message']}")
@@ -343,32 +333,29 @@ def deploy_key() -> Tuple[Dict[str, Any], int]:
                 500,
             )
 
-        # ✅ ТОЛЬКО ПОСЛЕ УСПЕХА SSH → создать KeyDeployment
-        try:
-            deployment = KeyDeployment(
-                ssh_key_id=key_id,
-                server_id=server_id,
-                deployed_by=current_user.id,
-                deployed_at=datetime.now(timezone.utc),
-            )
-            db.session.add(deployment)
-            db.session.commit()
-
-            add_log("deploy_key", target=f"{key_to_deploy.name} -> {server.name}")
-
+        # Проверяем результаты развертывания
+        if deploy_result["success_count"] > 0:
+            # ✅ Развертывание успешно (БД уже обновлена в сервисе)
             return (
                 jsonify(
                     {"success": True, "message": f"✅ Ключ успешно развёрнут на {server.name}"}
                 ),
                 200,
             )
+        else:
+            # ❌ Развертывание не удалось
+            error_details = deploy_result["results"][0] if deploy_result["results"] else {}
+            error_message = error_details.get("error", "Неизвестная ошибка")
+            error_type = error_details.get("error_type", "deploy_failed")
 
-        except Exception as db_error:
-            db.session.rollback()
-            logger.error(f"[DEPLOY_KEY_DB_ERROR] {str(db_error)}")
+            logger.warning(f"[DEPLOY_KEY_FAILED] {error_message}")
             return (
                 jsonify(
-                    {"success": False, "message": f"SSH успешно, но ошибка БД: {str(db_error)}"}
+                    {
+                        "success": False,
+                        "message": error_message,
+                        "error_type": error_type,
+                    }
                 ),
                 500,
             )

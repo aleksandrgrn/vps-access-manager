@@ -1,6 +1,6 @@
 # SSH operations (deploy, revoke, etc.)
 import logging
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List
 
 from app.services.ssh.connection import SSHConnection
 from app.services.ssh.keys import validate_ssh_public_key
@@ -8,7 +8,7 @@ from app.services.ssh.keys import validate_ssh_public_key
 logger = logging.getLogger(__name__)
 
 
-def deploy_key_to_server(server, key, connection: SSHConnection) -> Tuple[bool, str]:
+def deploy_key_to_server(server, key, connection: SSHConnection) -> Dict[str, Any]:
     """
     Развёртывает публичный ключ на сервере через SSHConnection.
 
@@ -18,18 +18,26 @@ def deploy_key_to_server(server, key, connection: SSHConnection) -> Tuple[bool, 
         connection: Активное SSH-соединение
 
     Returns:
-        Tuple[bool, str]: Успех и сообщение
+        Dict[str, Any]: {'success': bool, 'message': str, 'error_type': str (optional)}
     """
     if not validate_ssh_public_key(key):
         logger.error(f"Невалидный ключ для сервера {server.name}")
-        return False, "Невалидный формат публичного ключа"
+        return {
+            "success": False,
+            "message": "Невалидный формат публичного ключа",
+            "error_type": "invalid_key",
+        }
 
     try:
         # Создаем директорию ~/.ssh с правами
         success, _, stderr = connection.execute("mkdir -p ~/.ssh && chmod 700 ~/.ssh", timeout=15)
         if not success:
             logger.error(f"Ошибка создания ~/.ssh на сервере {server.name}: {stderr}")
-            return False, f"Ошибка создания ~/.ssh: {stderr}"
+            return {
+                "success": False,
+                "message": f"Ошибка создания ~/.ssh: {stderr}",
+                "error_type": "mkdir_failed",
+            }
 
         # Проверяем, есть ли ключ в authorized_keys
         success, authorized_keys, _ = connection.execute(
@@ -37,7 +45,7 @@ def deploy_key_to_server(server, key, connection: SSHConnection) -> Tuple[bool, 
         )
         if key.strip() in authorized_keys:
             logger.info(f"Ключ уже присутствует на сервере {server.name}")
-            return True, "Ключ уже установлен"
+            return {"success": True, "message": "Ключ уже установлен"}
 
         # Добавляем ключ
         escaped_key = key.strip().replace("'", "'\\''")
@@ -46,16 +54,24 @@ def deploy_key_to_server(server, key, connection: SSHConnection) -> Tuple[bool, 
 
         if success:
             logger.info(f"Ключ успешно добавлен на сервер {server.name}")
-            return True, "Ключ успешно добавлен"
+            return {"success": True, "message": "Ключ успешно добавлен"}
         else:
             logger.error(f"Ошибка добавления ключа на сервер {server.name}: {stderr}")
-            return False, f"Ошибка добавления ключа: {stderr}"
+            return {
+                "success": False,
+                "message": f"Ошибка добавления ключа: {stderr}",
+                "error_type": "append_failed",
+            }
     except Exception as e:
         logger.error(f"Исключение при добавлении ключа на сервер {server.name}: {e}")
-        return False, f"Ошибка: {str(e)}"
+        return {
+            "success": False,
+            "message": f"Ошибка: {str(e)}",
+            "error_type": "exception",
+        }
 
 
-def revoke_key_from_server(server, key, connection: SSHConnection) -> Tuple[bool, str]:
+def revoke_key_from_server(server, key, connection: SSHConnection) -> Dict[str, Any]:
     """
     Отзывает публичный ключ с сервера через SSHConnection.
 
@@ -65,11 +81,15 @@ def revoke_key_from_server(server, key, connection: SSHConnection) -> Tuple[bool
         connection: Активное SSH-соединение
 
     Returns:
-        Tuple[bool, str]: Успех и сообщение
+        Dict[str, Any]: {'success': bool, 'message': str, 'error_type': str (optional)}
     """
     if not validate_ssh_public_key(key):
         logger.error(f"Невалидный ключ для отзыва на сервере {server.name}")
-        return False, "Невалидный формат ключа"
+        return {
+            "success": False,
+            "message": "Невалидный формат ключа",
+            "error_type": "invalid_key",
+        }
 
     try:
         # Создаём backup authorized_keys
@@ -82,14 +102,22 @@ def revoke_key_from_server(server, key, connection: SSHConnection) -> Tuple[bool
             "cat ~/.ssh/authorized_keys || echo ''", timeout=10
         )
         if not success:
-            return False, "Не удалось прочитать authorized_keys"
+            return {
+                "success": False,
+                "message": "Не удалось прочитать authorized_keys",
+                "error_type": "read_failed",
+            }
 
         lines = content.strip().split("\n")
         key_stripped = key.strip()
         new_lines = [line for line in lines if key_stripped not in line.strip()]
 
         if len(new_lines) == len(lines):
-            return False, "Ключ не найден в authorized_keys"
+            return {
+                "success": False,
+                "message": "Ключ не найден в authorized_keys",
+                "error_type": "key_not_found",
+            }
 
         new_content = "\n".join(new_lines)
         if new_content and not new_content.endswith("\n"):
@@ -104,17 +132,25 @@ def revoke_key_from_server(server, key, connection: SSHConnection) -> Tuple[bool
 
         if success:
             logger.info(f"Ключ успешно отозван на сервере {server.name}")
-            return True, "Ключ успешно отозван"
+            return {"success": True, "message": "Ключ успешно отозван"}
         else:
             # Восстанавливаем backup
             connection.execute(
                 "mv ~/.ssh/authorized_keys.bak ~/.ssh/authorized_keys || true", timeout=10
             )
             logger.error(f"Ошибка при отзыве ключа на сервере {server.name}: {stderr}")
-            return False, f"Ошибка при обновлении authorized_keys: {stderr}"
+            return {
+                "success": False,
+                "message": f"Ошибка при обновлении authorized_keys: {stderr}",
+                "error_type": "write_failed",
+            }
     except Exception as e:
         logger.error(f"Исключение при отзыве ключа на сервере {server.name}: {e}")
-        return False, f"Ошибка: {str(e)}"
+        return {
+            "success": False,
+            "message": f"Ошибка: {str(e)}",
+            "error_type": "exception",
+        }
 
 
 def verify_key_deployed(server, key, connection: SSHConnection) -> bool:
@@ -164,9 +200,9 @@ def bulk_deploy_keys(servers: List, keys: List) -> Dict:
             if not success:
                 return server, key, False, error
 
-            deployed, msg = deploy_key_to_server(server, key, conn)
+            deploy_result = deploy_key_to_server(server, key, conn)
             conn.close()
-            return server, key, deployed, msg
+            return server, key, deploy_result["success"], deploy_result["message"]
         except Exception as e:
             if conn:
                 conn.close()

@@ -9,6 +9,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from flask import Flask, request
+from flask.json.provider import DefaultJSONProvider
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
@@ -46,6 +47,17 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     # ✅ Передай пути в Flask
     app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+
+    # ✅ Настройка JSON encoder для корректного отображения русского текста
+    class UnicodeJSONProvider(DefaultJSONProvider):
+        """
+        Custom JSON provider that ensures Russian text is not escaped.
+        This fixes the issue where alert() shows \\u**** instead of readable text.
+        """
+
+        ensure_ascii = False
+
+    app.json = UnicodeJSONProvider(app)
 
     # Базовая конфигурация
     app.config.update(

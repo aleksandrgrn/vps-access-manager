@@ -415,9 +415,9 @@ def add_server_with_password():
             else:
                 # Создаем временный объект сервера для operations
                 temp_server = SimpleNamespace(name=form.name.data)
-                success, message = operations.deploy_key_to_server(
-                    temp_server, public_key_ssh, conn
-                )
+                result = operations.deploy_key_to_server(temp_server, public_key_ssh, conn)
+                success = result["success"]
+                message = result["message"]
                 deploy_result = {"success": success, "message": message}
         except Exception as e:
             deploy_result = {"success": False, "message": str(e)}
@@ -700,9 +700,9 @@ def bulk_import_servers():
                         message = conn_error
                     else:
                         temp_server = SimpleNamespace(name=domain)
-                        success, message = operations.deploy_key_to_server(
-                            temp_server, public_key_ssh, conn
-                        )
+                        result = operations.deploy_key_to_server(temp_server, public_key_ssh, conn)
+                        success = result["success"]
+                        message = result["message"]
                 finally:
                     conn.close()
 

@@ -96,9 +96,11 @@ def validate_ssh_public_key(public_key: str) -> bool:
     Returns:
         bool: True если ключ в корректном формате, False иначе.
     """
+    logger.debug(f"Validating key: '{public_key}'")
     try:
         parts = public_key.strip().split()
         if len(parts) < 2:
+            logger.warning(f"Validation failed: Too few parts ({len(parts)})")
             return False
 
         # Проверяем что это SSH ключ
@@ -109,16 +111,19 @@ def validate_ssh_public_key(public_key: str) -> bool:
             "ecdsa-sha2-nistp384",
             "ecdsa-sha2-nistp521",
         ]:
+            logger.warning(f"Validation failed: Invalid key type: {parts[0]}")
             return False
 
         # Проверяем что base64 часть валидна
         try:
             base64.b64decode(parts[1])
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Validation failed: Base64 decode failed: {e}")
             return False
 
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Validation failed: Unexpected error: {e}")
         return False
 
 

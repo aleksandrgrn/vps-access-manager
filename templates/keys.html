@@ -388,7 +388,16 @@
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            if (errorData.message) {
+                errorMessage = errorData.message;
+            }
+        } catch (e) {
+             // ignore
+        }
+        throw new Error(errorMessage);
       }
       
       const data = await response.json();
@@ -448,8 +457,17 @@
       console.log('5. Получен ответ:', response.status, response.statusText);
       
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+        let errorMessage = `Ошибка HTTP: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            if (errorData.message) {
+                errorMessage = errorData.message;
+            }
+        } catch (e) {
+            const errorText = await response.text();
+            if (errorText) errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();

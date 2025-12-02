@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models import KeyDeployment, SSHKey
+from app.models import KeyDeployment, SSHKey, User
 
 
 @pytest.fixture
@@ -83,12 +83,24 @@ def test_deploy_key_success(auth_client, new_server, new_ssh_key):
 
     db.session.commit()
 
-    with patch("app.routes.keys.decrypt_access_key") as mock_decrypt, patch(
-        "app.routes.keys.deploy_key_to_server"
-    ) as mock_deploy:
+    # Get the user ID (auth_client uses 'testuser')
+    user = User.query.filter_by(username="testuser").first()
+    assert user is not None
 
-        mock_decrypt.return_value = {"success": True, "private_key": "priv"}
-        mock_deploy.return_value = {"success": True, "message": "Deployed"}
+    # We mock the specific low-level SSH operations, not the whole service
+    with patch("app.services.deployment_service.decrypt_access_key") as mock_decrypt, patch(
+        "app.services.deployment_service.ssh_connection"
+    ) as mock_conn, patch("app.services.deployment_service.deploy_key_to_server") as mock_deploy_op:
+
+        # 1. Mock decryption success
+        mock_decrypt.return_value = {"success": True, "private_key": "fake_private_key"}
+
+        # 2. Mock SSH connection (context manager)
+        # mock_conn is a context manager, so we mock what it yields
+        mock_conn.return_value.__enter__.return_value = "mock_connection"
+
+        # 3. Mock deployment operation success
+        mock_deploy_op.return_value = {"success": True, "message": "Key successfully deployed"}
 
         response = auth_client.post(
             "/api/keys/deploy", json={"key_id": new_ssh_key.id, "server_id": new_server.id}
@@ -96,12 +108,19 @@ def test_deploy_key_success(auth_client, new_server, new_ssh_key):
 
         assert response.status_code == 200
         assert response.json["success"] is True
-        assert (
-            KeyDeployment.query.filter_by(
-                ssh_key_id=new_ssh_key.id, server_id=new_server.id
-            ).first()
-            is not None
-        )
+
+        # Verify mocks were called
+        mock_decrypt.assert_called_once()
+        mock_conn.assert_called_once()
+        mock_deploy_op.assert_called_once()
+
+        # Verify DB side effects: KeyDeployment should be created
+        deployment = KeyDeployment.query.filter_by(
+            ssh_key_id=new_ssh_key.id, server_id=new_server.id, revoked_at=None
+        ).first()
+
+        assert deployment is not None
+        assert deployment.deployed_by == user.id
 
 
 def test_bulk_deploy_keys(auth_client, new_server, new_ssh_key):

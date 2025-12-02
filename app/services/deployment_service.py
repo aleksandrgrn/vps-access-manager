@@ -11,12 +11,9 @@ from typing import Any, Dict, List
 
 from app import db
 from app.models import KeyDeployment, Server, SSHKey
-from app.services.key_service import (
-    decrypt_access_key,
-    deploy_key_to_server,
-    revoke_key_from_all_servers,
-    revoke_key_from_single_server,
-)
+from app.services.key_service import decrypt_access_key, revoke_key_from_all_servers
+from app.services.ssh.connection import ssh_connection
+from app.services.ssh.operations import deploy_key_to_server, revoke_key_from_server
 from app.utils import add_log
 
 logger = logging.getLogger(__name__)
@@ -150,7 +147,15 @@ def deploy_key_to_servers(user_id: int, key_id: int, server_ids: List[int]) -> D
 
             # Perform SSH deployment
             logger.info(f"[DEPLOY_SERVICE_SSH] Deploying to {server.name}")
-            deploy_result = deploy_key_to_server(server, decrypt_result["private_key"], key)
+            logger.error(f"DEBUG_DEPLOY: key_id={key.id}, public_key='{key.public_key}'")
+            with ssh_connection(
+                host=server.ip_address,
+                port=server.ssh_port,
+                username=server.username,
+                private_key=decrypt_result["private_key"],
+                server_obj=server,
+            ) as conn:
+                deploy_result = deploy_key_to_server(server, key.public_key, conn)
 
             if deploy_result["success"]:
                 # Update DB only on success
@@ -312,7 +317,14 @@ def revoke_deployment_by_id(user_id: int, deployment_id: int) -> Dict[str, Any]:
 
     # Perform SSH revocation
     try:
-        revoke_result = revoke_key_from_single_server(server, private_key, key_to_revoke)
+        with ssh_connection(
+            host=server.ip_address,
+            port=server.ssh_port,
+            username=server.username,
+            private_key=private_key,
+            server_obj=server,
+        ) as conn:
+            revoke_result = revoke_key_from_server(server, key_to_revoke.public_key, conn)
     except Exception as ssh_error:
         logger.error(f"[REVOKE_SERVICE_SSH_EXCEPTION] {str(ssh_error)}")
         add_log(

@@ -62,7 +62,9 @@ class TestDeployKeyToServer:
         ]
 
         # Выполнение
-        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        result = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is True
@@ -81,7 +83,9 @@ class TestDeployKeyToServer:
         ]
 
         # Выполнение
-        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        result = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is True
@@ -93,7 +97,9 @@ class TestDeployKeyToServer:
         invalid_key = "invalid-key-format"
 
         # Выполнение
-        success, message = deploy_key_to_server(mock_server, invalid_key, mock_connection)
+        result = deploy_key_to_server(mock_server, invalid_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is False
@@ -109,7 +115,9 @@ class TestDeployKeyToServer:
         mock_connection.execute.return_value = (False, "", "Permission denied")
 
         # Выполнение
-        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        result = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is False
@@ -128,7 +136,9 @@ class TestDeployKeyToServer:
         ]
 
         # Выполнение
-        success, message = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        result = deploy_key_to_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is False
@@ -155,7 +165,9 @@ class TestRevokeKeyFromServer:
         ]
 
         # Выполнение
-        success, message = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+        result = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is True
@@ -174,7 +186,9 @@ class TestRevokeKeyFromServer:
         ]
 
         # Выполнение
-        success, message = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+        result = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is False
@@ -185,7 +199,9 @@ class TestRevokeKeyFromServer:
         invalid_key = "invalid-key-format"
 
         # Выполнение
-        success, message = revoke_key_from_server(mock_server, invalid_key, mock_connection)
+        result = revoke_key_from_server(mock_server, invalid_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is False
@@ -206,7 +222,9 @@ class TestRevokeKeyFromServer:
         ]
 
         # Выполнение
-        success, message = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+        result = revoke_key_from_server(mock_server, valid_public_key, mock_connection)
+        success = result["success"]
+        message = result["message"]
 
         # Проверки
         assert success is False
