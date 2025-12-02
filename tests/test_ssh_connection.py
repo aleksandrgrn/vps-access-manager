@@ -159,6 +159,46 @@ class TestSSHConnectionKey:
         assert call_kwargs["pkey"] == mock_pkey
 
     @patch("app.services.ssh.connection.paramiko.SSHClient")
+    @patch("app.services.ssh.connection.paramiko.RSAKey")
+    @patch("app.services.ssh.connection.paramiko.Ed25519Key")
+    def test_connect_with_key_rsa_openssh_format(
+        self,
+        mock_ed25519_key_class,
+        mock_rsa_key_class,
+        mock_ssh_client_class,
+    ):
+        """Успешное подключение по RSA-ключу в формате OpenSSH (без заголовка RSA)."""
+        # Тестовый ключ в формате OpenSSH (заголовок не содержит RSA)
+        openssh_key = """-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn
+NhAAAAAwEAAQAAAYEAz...
+-----END OPENSSH PRIVATE KEY-----"""
+
+        # Настройка моков
+        mock_pkey = MagicMock()
+        # RSA загрузка проходит успешно
+        mock_rsa_key_class.from_private_key.return_value = mock_pkey
+        # Ed25519 не должен вызываться или должен падать (но мы ожидаем успех на RSA)
+        mock_ed25519_key_class.from_private_key.side_effect = paramiko.SSHException("Invalid key")
+
+        mock_client = MagicMock()
+        mock_transport = MagicMock()
+        mock_client.get_transport.return_value = mock_transport
+        mock_ssh_client_class.return_value = mock_client
+
+        # Создание соединения
+        conn = SSHConnection("192.168.1.1", 22, "root")
+        success, error = conn.connect_with_key(openssh_key)
+
+        # Проверки
+        assert success is True
+        assert error is None
+        # Должен был попытаться загрузить как RSA
+        mock_rsa_key_class.from_private_key.assert_called_once()
+        # И не должен был пытаться как Ed25519 (так как RSA сработал)
+        mock_ed25519_key_class.from_private_key.assert_not_called()
+
+    @patch("app.services.ssh.connection.paramiko.SSHClient")
     @patch("app.services.ssh.connection.paramiko.Ed25519Key")
     def test_connect_with_key_ed25519_success(
         self, mock_ed25519_key_class, mock_ssh_client_class, ed25519_private_key

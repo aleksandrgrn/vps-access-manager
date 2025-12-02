@@ -164,12 +164,18 @@ class SSHConnection:
         try:
             # Парсим приватный ключ
             key_file = io.StringIO(private_key_str)
-            if "RSA" in private_key_str:
+            try:
+                # Сначала пробуем загрузить как RSA (наиболее часто используемый)
                 pkey = paramiko.RSAKey.from_private_key(key_file)
-            elif "PRIVATE KEY" in private_key_str:
-                pkey = paramiko.Ed25519Key.from_private_key(key_file)
-            else:
-                raise paramiko.SSHException("Неподдерживаемый формат приватного ключа")
+            except paramiko.SSHException:
+                # Если не получилось, сбрасываем файл и пробуем Ed25519
+                key_file.seek(0)
+                try:
+                    pkey = paramiko.Ed25519Key.from_private_key(key_file)
+                except paramiko.SSHException:
+                    raise paramiko.SSHException(
+                        "Неподдерживаемый формат приватного ключа или неверный ключ"
+                    )
 
             # Создаем SSH клиент
             self.client = paramiko.SSHClient()
