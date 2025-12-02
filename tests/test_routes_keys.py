@@ -148,3 +148,39 @@ def test_bulk_deploy_keys(auth_client, new_server, new_ssh_key):
         assert response.status_code == 200
         assert response.json["success"] is True
         assert len(response.json["deployed"]) == 1
+
+
+def test_bulk_deploy_keys_with_skipped(auth_client, new_server, new_ssh_key):
+    """Test bulk key deployment with skipped items."""
+    new_server.access_key = new_ssh_key
+    from app import db
+
+    db.session.commit()
+
+    with patch("app.routes.keys.bulk_deploy_keys") as mock_bulk, patch(
+        "app.routes.keys.decrypt_access_key"
+    ) as mock_decrypt:
+
+        mock_decrypt.return_value = {"success": True, "private_key": "priv"}
+        mock_bulk.return_value = {
+            "deployed": [],
+            "skipped": [
+                {
+                    "server_id": new_server.id,
+                    "server_name": new_server.name,
+                    "reason": "Already exists",
+                }
+            ],
+            "failed": [],
+            "total": 1,
+        }
+
+        response = auth_client.post(
+            "/api/keys/bulk-deploy", json={"key_id": new_ssh_key.id, "server_ids": [new_server.id]}
+        )
+
+        assert response.status_code == 200
+        assert response.json["success"] is True
+        assert len(response.json["deployed"]) == 0
+        assert len(response.json["skipped"]) == 1
+        assert response.json["skipped"][0]["reason"] == "Already exists"

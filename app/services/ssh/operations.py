@@ -45,7 +45,8 @@ def deploy_key_to_server(server, key, connection: SSHConnection) -> Dict[str, An
         )
         if key.strip() in authorized_keys:
             logger.info(f"Ключ уже присутствует на сервере {server.name}")
-            return {"success": True, "message": "Ключ уже установлен"}
+
+            return {"success": True, "message": "Ключ уже установлен", "status": "skipped"}
 
         # Добавляем ключ
         escaped_key = key.strip().replace("'", "'\\''")
@@ -54,7 +55,8 @@ def deploy_key_to_server(server, key, connection: SSHConnection) -> Dict[str, An
 
         if success:
             logger.info(f"Ключ успешно добавлен на сервер {server.name}")
-            return {"success": True, "message": "Ключ успешно добавлен"}
+
+            return {"success": True, "message": "Ключ успешно добавлен", "status": "deployed"}
         else:
             logger.error(f"Ошибка добавления ключа на сервер {server.name}: {stderr}")
             return {
@@ -190,7 +192,7 @@ def bulk_deploy_keys(servers: List, keys: List) -> Dict:
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    results = {"deployed": [], "failed": [], "total": len(servers) * len(keys)}
+    results = {"deployed": [], "skipped": [], "failed": [], "total": len(servers) * len(keys)}
 
     def deploy_task(server, key):
         conn = None
@@ -202,7 +204,7 @@ def bulk_deploy_keys(servers: List, keys: List) -> Dict:
 
             deploy_result = deploy_key_to_server(server, key, conn)
             conn.close()
-            return server, key, deploy_result["success"], deploy_result["message"]
+            return server, key, deploy_result["success"], deploy_result
         except Exception as e:
             if conn:
                 conn.close()
@@ -215,16 +217,30 @@ def bulk_deploy_keys(servers: List, keys: List) -> Dict:
                 futures.append(executor.submit(deploy_task, server, key))
 
         for future in as_completed(futures):
-            server, key, success, msg = future.result()
+            server, key, success, result_data = future.result()
+
+            # result_data может быть строкой (если ошибка в deploy_task)
+            # или словарем (от deploy_key_to_server)
+            message = (
+                result_data if isinstance(result_data, str) else result_data.get("message", "")
+            )
+            status = result_data.get("status", "") if isinstance(result_data, dict) else ""
+
             if success:
-                results["deployed"].append(
-                    {"server_id": server.id, "server_name": server.name, "key": key}
-                )
-                logger.info(f"Ключ успешно развернут: сервер {server.name}")
+                if status == "skipped":
+                    results["skipped"].append(
+                        {"server_id": server.id, "server_name": server.name, "reason": message}
+                    )
+                    logger.info(f"Ключ пропущен (уже есть): сервер {server.name}")
+                else:
+                    results["deployed"].append(
+                        {"server_id": server.id, "server_name": server.name, "message": message}
+                    )
+                    logger.info(f"Ключ успешно развернут: сервер {server.name}")
             else:
                 results["failed"].append(
-                    {"server_id": server.id, "server_name": server.name, "key": key, "error": msg}
+                    {"server_id": server.id, "server_name": server.name, "error": message}
                 )
-                logger.error(f"Ошибка развертывания ключа на сервере {server.name}: {msg}")
+                logger.error(f"Ошибка развертывания ключа на сервере {server.name}: {message}")
 
     return results

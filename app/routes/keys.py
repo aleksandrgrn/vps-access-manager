@@ -556,27 +556,6 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
                 400,
             )
 
-        # Проверка на дубликаты развертывания
-        existing_deployments = KeyDeployment.query.filter(
-            KeyDeployment.ssh_key_id == key_id,
-            KeyDeployment.server_id.in_(server_ids),
-            KeyDeployment.revoked_at.is_(None),
-        ).all()
-
-        if existing_deployments:
-            existing_server_ids = [d.server_id for d in existing_deployments]
-            existing_servers = Server.query.filter(Server.id.in_(existing_server_ids)).all()
-            existing_names = [s.name for s in existing_servers]
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": f'Ключ уже развёрнут на серверах: {", ".join(existing_names)}',
-                    }
-                ),
-                400,
-            )
-
         logger.info(
             f"[BULK_DEPLOY] Начало массового развертывания ключа {key.name} "
             f"на {len(servers)} серверов"
@@ -643,6 +622,7 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
                         "success": False,
                         "message": f"SSH развертывание успешно, но ошибка БД: {str(commit_error)}",
                         "deployed": results["deployed"],
+                        "skipped": results.get("skipped", []),
                         "failed": results["failed"],
                         "total": results["total"],
                     }
@@ -652,22 +632,27 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
 
         # Формирование ответа
         success_count = len(results["deployed"])
+        skipped_count = len(results.get("skipped", []))
         failed_count = len(results["failed"])
 
-        if success_count > 0 and failed_count == 0:
-            message = f"✅ Ключ успешно развёрнут на всех {success_count} серверах"
-        elif success_count > 0 and failed_count > 0:
-            message = f"⚠️ Развёрнуто на {success_count} серверах, ошибок: {failed_count}"
-        else:
-            message = "❌ Не удалось развернуть ни на одном сервере"
+        parts = []
+        if success_count > 0:
+            parts.append(f"Развёрнуто: {success_count}")
+        if skipped_count > 0:
+            parts.append(f"Пропущено: {skipped_count}")
+        if failed_count > 0:
+            parts.append(f"Ошибок: {failed_count}")
+
+        message = ", ".join(parts) if parts else "Ничего не сделано"
 
         logger.info(f"[BULK_DEPLOY] Завершено. {message}")
 
         return (
             jsonify(
                 {
-                    "success": success_count > 0,
+                    "success": True,
                     "deployed": results["deployed"],
+                    "skipped": results.get("skipped", []),
                     "failed": results["failed"],
                     "total": results["total"],
                     "message": message,
