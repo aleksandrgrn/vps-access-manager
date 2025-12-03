@@ -28,6 +28,7 @@
                     <thead class="table-light">
                         <tr>
                             <th>Название</th>
+                            <th>Категории</th>
                             <th>IP Адрес</th>
                             <th>Порт</th>
                             <th>Пользователь</th>
@@ -40,6 +41,11 @@
                         {% for server in servers %}
                         <tr id="server-{{ server.id }}">
                             <td data-field="name">{{ server.name }}</td>
+                            <td data-field="categories">
+                                {% for cat in server.categories %}
+                                <span class="badge" style="background-color: {{ cat.color }};">{{ cat.name }}</span>
+                                {% endfor %}
+                            </td>
                             <td data-field="ip_address">{{ server.ip_address }}</td>
                             <td data-field="ssh_port">{{ server.ssh_port }}</td>
                             <td data-field="username">{{ server.username }}</td>
@@ -69,7 +75,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="7" class="text-center py-4">Серверы еще не добавлены.</td>
+                            <td colspan="8" class="text-center py-4">Серверы еще не добавлены.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -114,6 +120,13 @@
                         {{ form.requires_legacy_ssh.label(class="form-check-label", for="server-legacy-ssh") }}
                         <div class="form-text d-block">Включите, если сервер использует OpenSSH версии < 7.2. Обычно
                                 автоматически определяется при инициализации.</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Категории</label>
+                            <div id="addServerCategoryList" class="border rounded p-2"
+                                style="max-height: 150px; overflow-y: auto;">
+                                <!-- Чекбоксы категорий будут загружены JS -->
+                            </div>
                         </div>
                         <div class="mb-3" id="password-field">
                             <label for="serverPassword" class="form-label">Пароль для SSH</label>
@@ -175,6 +188,14 @@
                     <small class="text-muted d-block mt-1">
                         💡 Каждый сервер на новой строке, данные разделяются пробелами
                     </small>
+                </div>
+
+                <div class="mt-3">
+                    <label class="form-label">Назначить категории всем серверам</label>
+                    <div id="importServerCategoryList" class="border rounded p-2"
+                        style="max-height: 150px; overflow-y: auto;">
+                        <!-- Чекбоксы категорий будут загружены JS -->
+                    </div>
                 </div>
 
                 <!-- Блок ошибок (скрыт по умолчанию) -->
@@ -284,12 +305,19 @@
             const button = event.relatedTarget;
             const action = button.getAttribute('data-action');
 
+            // Загружаем категории при каждом открытии модалки
+            loadCategories();
+
             if (action === 'add') {
                 modalTitle.textContent = 'Добавить новый сервер';
                 serverForm.action = button.getAttribute('data-add-url');
                 passwordField.style.display = 'block';
                 // Очистка полей
                 serverForm.reset();
+                // Сбрасываем чекбоксы категорий
+                setTimeout(() => {
+                    document.querySelectorAll('#addServerCategoryList input[type="checkbox"]').forEach(cb => cb.checked = false);
+                }, 100);
             } else if (action === 'edit') {
                 modalTitle.textContent = 'Редактировать сервер';
                 const serverId = button.getAttribute('data-id');
@@ -303,6 +331,58 @@
 
                 serverForm.action = `/api/servers/edit/${serverId}`;
                 passwordField.style.display = 'none';
+            }
+        });
+
+        // Обработчик отправки формы сервера
+        serverForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            // Собираем выбранные категории
+            const categoryCheckboxes = document.querySelectorAll('#addServerCategoryList input[type="checkbox"]:checked');
+            const categoryIds = Array.from(categoryCheckboxes).map(cb => parseInt(cb.value));
+
+            // Собираем данные формы
+            const formData = new FormData(serverForm);
+
+            // Добавляем category_ids как JSON
+            const requestData = {
+                name: formData.get('name'),
+                ip_address: formData.get('ip_address'),
+                ssh_port: formData.get('ssh_port'),
+                username: formData.get('username'),
+                requires_legacy_ssh: formData.get('requires_legacy_ssh') ? true : false,
+                category_ids: categoryIds
+            };
+
+            // Для добавления нового сервера нужен пароль
+            if (serverForm.action.includes('/add')) {
+                requestData.password = formData.get('password');
+            }
+
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+            try {
+                const response = await fetch(serverForm.action, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                const data = await response.json();
+
+                if (data.success || response.ok) {
+                    alert('✅ ' + (data.message || 'Сервер успешно сохранён'));
+                    location.reload();
+                } else {
+                    alert('❌ ' + (data.message || 'Произошла ошибка'));
+                }
+            } catch (error) {
+                console.error('Error submitting server form:', error);
+                alert('❌ Произошла ошибка при отправке запроса');
             }
         });
 
@@ -411,6 +491,10 @@
             return;
         }
 
+        // Collect selected category IDs
+        const categoryCheckboxes = document.querySelectorAll('#importServerCategoryList input[type="checkbox"]:checked');
+        const categoryIds = Array.from(categoryCheckboxes).map(cb => parseInt(cb.value));
+
         // UI Elements
         const btn = document.getElementById('submitBulkImport');
         const cancelBtn = document.querySelector('#bulkImportModal .btn-secondary');
@@ -433,7 +517,8 @@
                 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
             },
             body: JSON.stringify({
-                servers_data: serversData
+                servers_data: serversData,
+                category_ids: categoryIds
             })
         })
             .then(response => response.json())
@@ -513,37 +598,84 @@
     // Global functions for category management
     async function loadCategories() {
         const categoriesList = document.getElementById('categoriesList');
-        if (!categoriesList) return;
+        const addServerCategoryList = document.getElementById('addServerCategoryList');
+        const importServerCategoryList = document.getElementById('importServerCategoryList');
 
         try {
             const response = await fetch('/api/categories');
             const categories = await response.json();
 
-            categoriesList.innerHTML = '';
+            // Update categories list in management modal
+            if (categoriesList) {
+                categoriesList.innerHTML = '';
 
-            if (categories.length === 0) {
-                categoriesList.innerHTML = '<div class="list-group-item text-center text-muted">Нет категорий</div>';
-                return;
+                if (categories.length === 0) {
+                    categoriesList.innerHTML = '<div class="list-group-item text-center text-muted">Нет категорий</div>';
+                } else {
+                    categories.forEach(cat => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                        item.innerHTML = `
+                            <div class="d-flex align-items-center">
+                                <span class="rounded-circle me-2" style="width: 12px; height: 12px; background-color: ${cat.color}; display: inline-block;"></span>
+                                <span>${cat.name}</span>
+                                <span class="badge bg-light text-dark ms-2 rounded-pill border">${cat.server_count || 0}</span>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${cat.id})" title="Удалить">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        `;
+                        categoriesList.appendChild(item);
+                    });
+                }
             }
 
-            categories.forEach(cat => {
-                const item = document.createElement('div');
-                item.className = 'list-group-item d-flex justify-content-between align-items-center';
-                item.innerHTML = `
-                    <div class="d-flex align-items-center">
-                        <span class="rounded-circle me-2" style="width: 12px; height: 12px; background-color: ${cat.color}; display: inline-block;"></span>
-                        <span>${cat.name}</span>
-                        <span class="badge bg-light text-dark ms-2 rounded-pill border">${cat.server_count || 0}</span>
-                    </div>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${cat.id})" title="Удалить">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                `;
-                categoriesList.appendChild(item);
-            });
+            // Populate checkboxes for add server modal
+            if (addServerCategoryList) {
+                addServerCategoryList.innerHTML = '';
+                if (categories.length === 0) {
+                    addServerCategoryList.innerHTML = '<div class="text-muted small">Нет доступных категорий</div>';
+                } else {
+                    categories.forEach(cat => {
+                        const div = document.createElement('div');
+                        div.className = 'form-check';
+                        div.innerHTML = `
+                            <input type="checkbox" class="form-check-input" value="${cat.id}" id="addCat${cat.id}">
+                            <label class="form-check-label" for="addCat${cat.id}">
+                                <span class="rounded-circle me-1" style="width: 8px; height: 8px; background-color: ${cat.color}; display: inline-block;"></span>
+                                ${cat.name}
+                            </label>
+                        `;
+                        addServerCategoryList.appendChild(div);
+                    });
+                }
+            }
+
+            // Populate checkboxes for import modal
+            if (importServerCategoryList) {
+                importServerCategoryList.innerHTML = '';
+                if (categories.length === 0) {
+                    importServerCategoryList.innerHTML = '<div class="text-muted small">Нет доступных категорий</div>';
+                } else {
+                    categories.forEach(cat => {
+                        const div = document.createElement('div');
+                        div.className = 'form-check';
+                        div.innerHTML = `
+                            <input type="checkbox" class="form-check-input" value="${cat.id}" id="importCat${cat.id}">
+                            <label class="form-check-label" for="importCat${cat.id}">
+                                <span class="rounded-circle me-1" style="width: 8px; height: 8px; background-color: ${cat.color}; display: inline-block;"></span>
+                                ${cat.name}
+                            </label>
+                        `;
+                        importServerCategoryList.appendChild(div);
+                    });
+                }
+            }
         } catch (error) {
             console.error('Error loading categories:', error);
-            categoriesList.innerHTML = '<div class="text-danger text-center">Ошибка загрузки категорий</div>';
+            if (categoriesList) {
+                categoriesList.innerHTML = '<div class="text-danger text-center">Ошибка загрузки категорий</div>';
+            }
         }
     }
 
@@ -616,10 +748,18 @@
     document.addEventListener('DOMContentLoaded', function () {
         const manageCategoriesModal = document.getElementById('manageCategoriesModal');
         const addCategoryForm = document.getElementById('addCategoryForm');
+        const bulkImportModal = document.getElementById('bulkImportModal');
 
         if (manageCategoriesModal) {
             // Load categories when modal opens
             manageCategoriesModal.addEventListener('show.bs.modal', function () {
+                loadCategories();
+            });
+        }
+
+        if (bulkImportModal) {
+            // Load categories when import modal opens
+            bulkImportModal.addEventListener('show.bs.modal', function () {
                 loadCategories();
             });
         }
