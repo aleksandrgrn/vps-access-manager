@@ -12,6 +12,9 @@
 
                 <i class="bi bi-plus-circle me-1"></i> Добавить сервер
             </button>
+            <button class="btn btn-secondary ms-2" data-bs-toggle="modal" data-bs-target="#manageCategoriesModal">
+                <i class="bi bi-tags"></i> Категории
+            </button>
             <button type="button" class="btn btn-success ms-2" data-bs-toggle="modal" data-bs-target="#bulkImportModal">
                 <i class="bi bi-cloud-arrow-up"></i> Массовый импорт
             </button>
@@ -218,6 +221,48 @@
                 <button type="button" class="btn btn-primary" id="submitBulkImport">
                     <i class="bi bi-check"></i> Сохранить
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Categories Modal -->
+<div class="modal fade" id="manageCategoriesModal" tabindex="-1" aria-labelledby="manageCategoriesModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manageCategoriesModalLabel">Управление категориями</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- List of Categories -->
+                <div class="mb-4">
+                    <h6 class="mb-3">Существующие категории</h6>
+                    <div id="categoriesList" class="list-group">
+                        <!-- Categories will be loaded here -->
+                        <div class="text-center py-3 text-muted">
+                            <div class="spinner-border spinner-border-sm" role="status"></div> Загрузка...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add New Category Form -->
+                <div>
+                    <h6 class="mb-3">Добавить новую категорию</h6>
+                    <form id="addCategoryForm" class="row g-2 align-items-end">
+                        <div class="col-7">
+                            <label for="newCategoryName" class="form-label small text-muted">Название</label>
+                            <input type="text" class="form-control" id="newCategoryName" placeholder="Например: Production" required>
+                        </div>
+                        <div class="col-2">
+                            <label for="newCategoryColor" class="form-label small text-muted">Цвет</label>
+                            <input type="color" class="form-control form-control-color w-100" id="newCategoryColor" value="#0d6efd" title="Выберите цвет">
+                        </div>
+                        <div class="col-3">
+                            <button type="submit" class="btn btn-primary w-100">Добавить</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </div>
@@ -458,6 +503,117 @@
                 errorContainer.textContent = `❌ Ошибка при отправке: ${error}`;
                 errorContainer.style.display = 'block';
             });
+
+    // --- Category Management Logic ---
+
+    const manageCategoriesModal = document.getElementById('manageCategoriesModal');
+    const categoriesList = document.getElementById('categoriesList');
+    const addCategoryForm = document.getElementById('addCategoryForm');
+
+    // Load categories when modal opens
+    manageCategoriesModal.addEventListener('show.bs.modal', function () {
+        loadCategories();
+    });
+
+    // Handle Add Category
+    addCategoryForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        createCategory();
+    });
+
+    async function loadCategories() {
+        try {
+            const response = await fetch('/api/categories');
+            const categories = await response.json();
+
+            categoriesList.innerHTML = '';
+
+            if (categories.length === 0) {
+                categoriesList.innerHTML = '<div class="list-group-item text-center text-muted">Нет категорий</div>';
+                return;
+            }
+
+            categories.forEach(cat => {
+                const item = document.createElement('div');
+                item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                item.innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <span class="rounded-circle me-2" style="width: 12px; height: 12px; background-color: ${cat.color}; display: inline-block;"></span>
+                        <span>${cat.name}</span>
+                        <span class="badge bg-light text-dark ms-2 rounded-pill border">${cat.server_count || 0}</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${cat.id})" title="Удалить">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                `;
+                categoriesList.appendChild(item);
+            });
+        } catch (error) {
+            console.error('Error loading categories:', error);
+            categoriesList.innerHTML = '<div class="text-danger text-center">Ошибка загрузки категорий</div>';
+        }
+    }
+
+    async function createCategory() {
+        const nameInput = document.getElementById('newCategoryName');
+        const colorInput = document.getElementById('newCategoryColor');
+        const name = nameInput.value.trim();
+        const color = colorInput.value;
+
+        if (!name) return;
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        try {
+            const response = await fetch('/api/categories', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({ name, color })
+            });
+
+            if (response.ok) {
+                nameInput.value = '';
+                // Reload list
+                loadCategories();
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.message || 'Не удалось создать категорию'));
+            }
+        } catch (error) {
+            console.error('Error creating category:', error);
+            alert('Ошибка при создании категории');
+        }
+    }
+
+    window.deleteCategory = async function(id) {
+        if (!confirm('Вы уверены, что хотите удалить эту категорию?')) {
+            return;
+        }
+
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        try {
+            const response = await fetch(`/api/categories/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
+
+            if (response.ok) {
+                loadCategories();
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.message || 'Не удалось удалить категорию'));
+            }
+        } catch (error) {
+            console.error('Error deleting category:', error);
+            alert('Ошибка при удалении категории');
+        }
+    };
     });
 </script>
 {% endblock %}
