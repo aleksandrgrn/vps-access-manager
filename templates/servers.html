@@ -227,7 +227,8 @@
 </div>
 
 <!-- Manage Categories Modal -->
-<div class="modal fade" id="manageCategoriesModal" tabindex="-1" aria-labelledby="manageCategoriesModalLabel" aria-hidden="true">
+<div class="modal fade" id="manageCategoriesModal" tabindex="-1" aria-labelledby="manageCategoriesModalLabel"
+    aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -252,11 +253,13 @@
                     <form id="addCategoryForm" class="row g-2 align-items-end">
                         <div class="col-7">
                             <label for="newCategoryName" class="form-label small text-muted">Название</label>
-                            <input type="text" class="form-control" id="newCategoryName" placeholder="Например: Production" required>
+                            <input type="text" class="form-control" id="newCategoryName"
+                                placeholder="Например: Production" required>
                         </div>
                         <div class="col-2">
                             <label for="newCategoryColor" class="form-label small text-muted">Цвет</label>
-                            <input type="color" class="form-control form-control-color w-100" id="newCategoryColor" value="#0d6efd" title="Выберите цвет">
+                            <input type="color" class="form-control form-control-color w-100" id="newCategoryColor"
+                                value="#0d6efd" title="Выберите цвет">
                         </div>
                         <div class="col-3">
                             <button type="submit" class="btn btn-primary w-100">Добавить</button>
@@ -503,25 +506,15 @@
                 errorContainer.textContent = `❌ Ошибка при отправке: ${error}`;
                 errorContainer.style.display = 'block';
             });
+    }); // End of bulk import handler
 
     // --- Category Management Logic ---
 
-    const manageCategoriesModal = document.getElementById('manageCategoriesModal');
-    const categoriesList = document.getElementById('categoriesList');
-    const addCategoryForm = document.getElementById('addCategoryForm');
-
-    // Load categories when modal opens
-    manageCategoriesModal.addEventListener('show.bs.modal', function () {
-        loadCategories();
-    });
-
-    // Handle Add Category
-    addCategoryForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        createCategory();
-    });
-
+    // Global functions for category management
     async function loadCategories() {
+        const categoriesList = document.getElementById('categoriesList');
+        if (!categoriesList) return;
+
         try {
             const response = await fetch('/api/categories');
             const categories = await response.json();
@@ -557,6 +550,9 @@
     async function createCategory() {
         const nameInput = document.getElementById('newCategoryName');
         const colorInput = document.getElementById('newCategoryColor');
+
+        if (!nameInput || !colorInput) return;
+
         const name = nameInput.value.trim();
         const color = colorInput.value;
 
@@ -588,7 +584,8 @@
         }
     }
 
-    window.deleteCategory = async function(id) {
+    // Make deleteCategory global explicitly
+    window.deleteCategory = async function (id) {
         if (!confirm('Вы уверены, что хотите удалить эту категорию?')) {
             return;
         }
@@ -614,6 +611,26 @@
             alert('Ошибка при удалении категории');
         }
     };
+
+    // Initialize Category Event Listeners
+    document.addEventListener('DOMContentLoaded', function () {
+        const manageCategoriesModal = document.getElementById('manageCategoriesModal');
+        const addCategoryForm = document.getElementById('addCategoryForm');
+
+        if (manageCategoriesModal) {
+            // Load categories when modal opens
+            manageCategoriesModal.addEventListener('show.bs.modal', function () {
+                loadCategories();
+            });
+        }
+
+        if (addCategoryForm) {
+            // Handle Add Category
+            addCategoryForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                createCategory();
+            });
+        }
     });
 </script>
 {% endblock %}
