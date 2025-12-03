@@ -172,7 +172,7 @@
                                 <span class="badge bg-success">Активен</span>
                                 {% endif %}
                             </td>
-                            <td class="text-end">
+                            <td>
                                 {% if not deployment.revoked_at %}
                                 <button class="btn btn-sm btn-danger"
                                     onclick="openRevokeModal('{{ deployment.id }}', '{{ deployment.ssh_key.name }}', '{{ deployment.server.name }}')">
