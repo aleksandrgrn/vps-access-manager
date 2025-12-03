@@ -92,6 +92,11 @@ def revoke_key_deployment() -> Tuple[Dict[str, Any], int]:
         # ========== SCENARIO 0: Отзыв по deployment_id ==========
         if deployment_id:
             logger.info(f"[REVOKE_START] Scenario 0: deployment_id={deployment_id}")
+
+            # Получаем информацию о деплойменте ДО отзыва (для получения key_name)
+            deployment = KeyDeployment.query.get(deployment_id)
+            key_name = deployment.ssh_key.name if deployment and deployment.ssh_key else "Unknown"
+
             result = deployment_service.revoke_deployment_by_id(current_user.id, deployment_id)
 
             # Определяем HTTP статус код
@@ -108,13 +113,14 @@ def revoke_key_deployment() -> Tuple[Dict[str, Any], int]:
             else:
                 status_code = 200
 
-            # Добавляем server_info если есть server в результате
-            if "server" in result and result["success"]:
+            # Формируем детальный ответ для успешного случая
+            if result["success"] and "server" in result:
                 response = {
                     "success": True,
                     "message": "✅ Ключ успешно отозван с VPS",
-                    "server": result["server"],
-                    "ip": result.get("ip", ""),
+                    "server_name": result["server"],
+                    "server_ip": result.get("ip", ""),
+                    "key_name": key_name,
                 }
             else:
                 response = result
