@@ -24,7 +24,7 @@ from flask_login import current_user, login_required
 
 from app import db
 from app.forms import ServerForm
-from app.models import KeyDeployment, Log, Server, SSHKey
+from app.models import KeyDeployment, Log, Server, ServerCategory, SSHKey
 from app.services.ssh import keys as ssh_keys
 from app.services.ssh.connection import SSHConnection
 from app.services.ssh.server_manager import initialize_server, test_connection
@@ -89,6 +89,48 @@ def servers() -> str:
         logger.error(f"Ошибка при загрузке списка серверов: {str(e)}")
         flash(f"Ошибка при загрузке серверов: {str(e)}", "error")
         return render_template("servers.html", form=ServerForm(), servers=[], status_colors={})
+
+
+@bp.route("/api/servers", methods=["GET"])
+@login_required
+def get_servers() -> Tuple[Dict[str, Any], int]:
+    """
+    API эндпоинт для получения списка серверов с категориями.
+
+    Returns:
+        JSON со списком серверов и их категориями
+    """
+    try:
+        user_servers = Server.query.filter_by(user_id=current_user.id).all()
+
+        servers_data = []
+        for server in user_servers:
+            # Получаем категории сервера
+            categories = [
+                {"id": cat.id, "name": cat.name, "color": cat.color}
+                for cat in server.categories.all()
+            ]
+
+            servers_data.append(
+                {
+                    "id": server.id,
+                    "name": server.name,
+                    "ip_address": server.ip_address,
+                    "ssh_port": server.ssh_port,
+                    "username": server.username,
+                    "status": server.status,
+                    "openssh_version": server.openssh_version,
+                    "requires_legacy_ssh": server.requires_legacy_ssh,
+                    "categories": categories,
+                    "created_at": server.created_at.isoformat() if server.created_at else None,
+                }
+            )
+
+        return jsonify({"success": True, "servers": servers_data}), 200
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка серверов: {str(e)}")
+        return jsonify({"success": False, "message": f"Ошибка: {str(e)}"}), 500
 
 
 @bp.route("/servers/add", methods=["POST"])
@@ -283,6 +325,19 @@ def add_server() -> Any:
         db.session.add(new_server)
         db.session.flush()
         logger.info(f"[ADD_SERVER] Создан сервер {form.name.data} (ID: {new_server.id})")
+
+        # Привязка категорий, если переданы
+        category_ids = request.form.getlist("category_ids", type=int)
+        if category_ids:
+            for cat_id in category_ids:
+                category = ServerCategory.query.get(cat_id)
+                if category:
+                    new_server.categories.append(category)
+                    logger.info(
+                        f"[ADD_SERVER] Привязана категория {category.name} "
+                        f"к серверу {new_server.id}"
+                    )
+            db.session.flush()
 
     except Exception as e:
         logger.error(f"[ADD_SERVER_ERROR] Ошибка сохранения сервера: {str(e)}")
@@ -811,6 +866,19 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 db.session.add(new_server)
                 db.session.flush()
                 logger.info(f"[BULK_IMPORT] Создан сервер {domain} (ID: {new_server.id})")
+
+                # Привязка категорий, если переданы
+                category_ids = data.get("category_ids", [])
+                if category_ids:
+                    for cat_id in category_ids:
+                        category = ServerCategory.query.get(cat_id)
+                        if category:
+                            new_server.categories.append(category)
+                            logger.info(
+                                f"[BULK_IMPORT] Привязана категория {category.name} "
+                                f"к серверу {new_server.id}"
+                            )
+                    db.session.flush()
 
             except Exception as e:
                 db.session.rollback()
