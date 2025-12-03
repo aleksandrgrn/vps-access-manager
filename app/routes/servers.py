@@ -487,8 +487,6 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
 
     Returns:
         JSON с результатами импорта
-
-    ЯКОРЬ: БД обновляется ТОЛЬКО после успешного развёртывания ключа!
     """
     try:
         data = request.get_json()
@@ -498,9 +496,9 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     {
                         "success": False,
                         "message": "Отсутствуют данные для импорта",
-                        "added": 0,
-                        "skipped": 0,
-                        "failed": 0,
+                        "added": [],
+                        "skipped": [],
+                        "failed": [],
                     }
                 ),
                 400,
@@ -513,18 +511,20 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     {
                         "success": False,
                         "message": "Данные пусты",
-                        "added": 0,
-                        "skipped": 0,
-                        "failed": 0,
+                        "added": [],
+                        "skipped": [],
+                        "failed": [],
                     }
                 ),
                 400,
             )
 
         lines = servers_data.split("\n")
-        added = 0
-        skipped = 0
-        failed = 0
+
+        # Списки для детальных результатов
+        added_details = []
+        skipped_details = []
+        failed_details = []
 
         encryption_key = os.environ.get("ENCRYPTION_KEY")
         if not encryption_key:
@@ -533,9 +533,9 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     {
                         "success": False,
                         "message": "ENCRYPTION_KEY не установлен",
-                        "added": 0,
-                        "skipped": 0,
-                        "failed": 0,
+                        "added": [],
+                        "skipped": [],
+                        "failed": [],
                     }
                 ),
                 500,
@@ -550,8 +550,14 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             parts = line.split()
 
             if len(parts) != 5:
-                logger.warning(f"[BULK_IMPORT] Неверный формат строки (ожидается 5 полей): {line}")
-                failed += 1
+                logger.warning(f"[BULK_IMPORT] Неверный формат строки: {line}")
+                failed_details.append(
+                    {
+                        "name": line[:30] + "..." if len(line) > 30 else line,
+                        "ip": "N/A",
+                        "reason": "Неверный формат строки (ожидается 5 полей)",
+                    }
+                )
                 continue
 
             domain, username, password, ip_address, ssh_port_str = parts
@@ -563,7 +569,9 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 ipaddress.ip_address(ip_address)
             except ValueError:
                 logger.warning(f"[BULK_IMPORT] Неверный IP адрес: {ip_address}")
-                failed += 1
+                failed_details.append(
+                    {"name": domain, "ip": ip_address, "reason": "Неверный IP адрес"}
+                )
                 continue
 
             # Валидация порта
@@ -571,11 +579,23 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 ssh_port = int(ssh_port_str)
                 if ssh_port < 1 or ssh_port > 65535:
                     logger.warning(f"[BULK_IMPORT] SSH порт вне диапазона: {ssh_port}")
-                    failed += 1
+                    failed_details.append(
+                        {
+                            "name": domain,
+                            "ip": ip_address,
+                            "reason": f"SSH порт вне диапазона: {ssh_port}",
+                        }
+                    )
                     continue
             except ValueError:
                 logger.warning(f"[BULK_IMPORT] Неверный SSH порт: {ssh_port_str}")
-                failed += 1
+                failed_details.append(
+                    {
+                        "name": domain,
+                        "ip": ip_address,
+                        "reason": f"Неверный SSH порт: {ssh_port_str}",
+                    }
+                )
                 continue
 
             # Проверка дубликатов
@@ -585,7 +605,9 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
 
             if existing_server:
                 logger.info(f"[BULK_IMPORT] Сервер {ip_address} уже существует, пропускаем")
-                skipped += 1
+                skipped_details.append(
+                    {"name": domain, "ip": ip_address, "reason": "Сервер с таким IP уже существует"}
+                )
                 continue
 
             # Инициализация сервера
@@ -596,7 +618,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     logger.warning(
                         f"[BULK_IMPORT] {domain}: Ошибка инициализации - {init_result['message']}"
                     )
-                    failed += 1
+                    failed_details.append(
+                        {
+                            "name": domain,
+                            "ip": ip_address,
+                            "reason": f"Ошибка инициализации: {init_result['message']}",
+                        }
+                    )
                     continue
 
                 openssh_version = init_result["openssh_version"]
@@ -604,7 +632,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
 
             except Exception as e:
                 logger.error(f"[BULK_IMPORT] Ошибка инициализации {domain}: {str(e)}")
-                failed += 1
+                failed_details.append(
+                    {
+                        "name": domain,
+                        "ip": ip_address,
+                        "reason": f"Исключение при инициализации: {str(e)}",
+                    }
+                )
                 continue
 
             # STEP 2: Поиск или создание SSH-ключа
@@ -621,7 +655,7 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                         f"{existing_key.name}' (ID: {existing_key.id})"
                     )
                     new_root_key = existing_key
-                    public_key_ssh = existing_key.public_key  # ✅ КЛЮЧЕВАЯ СТРОКА
+                    public_key_ssh = existing_key.public_key
                 else:
                     logger.info(f"[BULK_IMPORT] Генерация ключа для {domain}")
                     private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key("rsa")
@@ -629,7 +663,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
 
                     if not fingerprint:
                         logger.error(f"[BULK_IMPORT] {domain}: не удалось получить fingerprint")
-                        failed += 1
+                        failed_details.append(
+                            {
+                                "name": domain,
+                                "ip": ip_address,
+                                "reason": "Не удалось получить fingerprint ключа",
+                            }
+                        )
                         continue
 
                     encrypted_private_key = ssh_keys.encrypt_private_key(
@@ -653,7 +693,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"[BULK_IMPORT] Ошибка при работе с ключом для {domain}: {str(e)}")
-                failed += 1
+                failed_details.append(
+                    {
+                        "name": domain,
+                        "ip": ip_address,
+                        "reason": f"Ошибка работы с ключом: {str(e)}",
+                    }
+                )
                 continue
 
             # Развёртывание ключа (КРИТИЧНО!)
@@ -667,7 +713,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 if not conn_success:
                     logger.error(f"[BULK_IMPORT] {domain}: Ошибка подключения - {conn_error}")
                     db.session.rollback()
-                    failed += 1
+                    failed_details.append(
+                        {
+                            "name": domain,
+                            "ip": ip_address,
+                            "reason": f"Ошибка SSH подключения: {conn_error}",
+                        }
+                    )
                     continue
 
                 try:
@@ -675,7 +727,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     if not ssh_keys.validate_ssh_public_key(public_key_ssh):
                         logger.error(f"[BULK_IMPORT] {domain}: Невалидный ключ")
                         db.session.rollback()
-                        failed += 1
+                        failed_details.append(
+                            {
+                                "name": domain,
+                                "ip": ip_address,
+                                "reason": "Сгенерирован невалидный публичный ключ",
+                            }
+                        )
                         continue
 
                     # Создаём .ssh и добавляем ключ
@@ -685,7 +743,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                     if not cmd1_success:
                         logger.error(f"[BULK_IMPORT] {domain}: Ошибка создания .ssh - {stderr1}")
                         db.session.rollback()
-                        failed += 1
+                        failed_details.append(
+                            {
+                                "name": domain,
+                                "ip": ip_address,
+                                "reason": f"Ошибка создания .ssh: {stderr1}",
+                            }
+                        )
                         continue
 
                     # Проверяем существование ключа
@@ -706,7 +770,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                                 f"[BULK_IMPORT] {domain}: Ошибка добавления ключа - {stderr3}"
                             )
                             db.session.rollback()
-                            failed += 1
+                            failed_details.append(
+                                {
+                                    "name": domain,
+                                    "ip": ip_address,
+                                    "reason": f"Ошибка записи ключа: {stderr3}",
+                                }
+                            )
                             continue
 
                     logger.info(f"[BULK_IMPORT] {domain}: Ключ успешно развёрнут")
@@ -716,7 +786,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"[BULK_IMPORT] Ошибка развёртывания на {domain}: {str(e)}")
-                failed += 1
+                failed_details.append(
+                    {
+                        "name": domain,
+                        "ip": ip_address,
+                        "reason": f"Исключение при развёртывании: {str(e)}",
+                    }
+                )
                 continue
 
             # Создание сервера (ТОЛЬКО после успешного развёртывания!)
@@ -739,7 +815,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"[BULK_IMPORT] Ошибка создания сервера {domain}: {str(e)}")
-                failed += 1
+                failed_details.append(
+                    {
+                        "name": domain,
+                        "ip": ip_address,
+                        "reason": f"Ошибка сохранения сервера в БД: {str(e)}",
+                    }
+                )
                 continue
 
             # Создание KeyDeployment
@@ -760,7 +842,13 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             except Exception as e:
                 db.session.rollback()
                 logger.error(f"[BULK_IMPORT] Ошибка создания deployment для {domain}: {str(e)}")
-                failed += 1
+                failed_details.append(
+                    {
+                        "name": domain,
+                        "ip": ip_address,
+                        "reason": f"Ошибка создания записи deployment: {str(e)}",
+                    }
+                )
                 continue
 
             add_log(
@@ -768,16 +856,16 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
                 target=domain,
                 details={"ip": ip_address, "port": ssh_port, "key_id": new_root_key.id},
             )
-            added += 1
+            added_details.append({"name": domain, "ip": ip_address, "status": "success"})
 
         return (
             jsonify(
                 {
                     "success": True,
-                    "message": "OK",
-                    "added": added,
-                    "skipped": skipped,
-                    "failed": failed,
+                    "message": "Импорт завершен",
+                    "added": added_details,
+                    "skipped": skipped_details,
+                    "failed": failed_details,
                 }
             ),
             200,
@@ -789,10 +877,10 @@ def bulk_import_servers() -> Tuple[Dict[str, Any], int]:
             jsonify(
                 {
                     "success": False,
-                    "message": f"Ошибка сервера: {str(e)}",
-                    "added": 0,
-                    "skipped": 0,
-                    "failed": 0,
+                    "message": f"Критическая ошибка сервера: {str(e)}",
+                    "added": [],
+                    "skipped": [],
+                    "failed": [],
                 }
             ),
             500,

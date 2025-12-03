@@ -7,11 +7,8 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2">Управление серверами</h1>
         <div>
-            <button class="btn btn-primary" 
-                    data-bs-toggle="modal" 
-                    data-bs-target="#serverModal"
-                    data-action="add"
-                    data-add-url="{{ url_for('servers.add_server') }}">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#serverModal" data-action="add"
+                data-add-url="{{ url_for('servers.add_server') }}">
 
                 <i class="bi bi-plus-circle me-1"></i> Добавить сервер
             </button>
@@ -43,29 +40,26 @@
                             <td data-field="ip_address">{{ server.ip_address }}</td>
                             <td data-field="ssh_port">{{ server.ssh_port }}</td>
                             <td data-field="username">{{ server.username }}</td>
-                            <td data-field="status"><span class="badge bg-{{ status_colors.get(server.status, 'secondary') }}">{{ server.status }}</span></td>
+                            <td data-field="status"><span
+                                    class="badge bg-{{ status_colors.get(server.status, 'secondary') }}">{{
+                                    server.status }}</span></td>
                             <td>{{ server.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <!-- Скрытые поля для редактирования -->
-                            <td data-field="requires_legacy_ssh" class="d-none">{{ server.requires_legacy_ssh|int }}</td>
+                            <td data-field="requires_legacy_ssh" class="d-none">{{ server.requires_legacy_ssh|int }}
+                            </td>
                             <td class="text-end">
-                                <button class="btn btn-sm btn-outline-secondary me-1 edit-btn" 
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#serverModal"
-                                        data-id="{{ server.id }}"
-                                        title="Редактировать сервер"
-                                        data-action="edit">
+                                <button class="btn btn-sm btn-outline-secondary me-1 edit-btn" data-bs-toggle="modal"
+                                    data-bs-target="#serverModal" data-id="{{ server.id }}" title="Редактировать сервер"
+                                    data-action="edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-info me-1 test-btn" data-id="{{ server.id }}"
-                                        title="Тестирование подключения">
+                                    title="Тестирование подключения">
                                     <i class="bi bi-shield-check"></i>
                                 </button>
-                                <button class="btn btn-sm btn-outline-danger delete-btn" 
-                                        data-bs-toggle="modal" 
-                                        data-bs-target="#deleteConfirmModal"
-                                        data-id="{{ server.id }}"
-                                        title="Удалить сервер"
-                                        data-name="{{ server.name }}">
+                                <button class="btn btn-sm btn-outline-danger delete-btn" data-bs-toggle="modal"
+                                    data-bs-target="#deleteConfirmModal" data-id="{{ server.id }}"
+                                    title="Удалить сервер" data-name="{{ server.name }}">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </td>
@@ -115,25 +109,28 @@
                     <div class="mb-3 form-check">
                         {{ form.requires_legacy_ssh(class="form-check-input", id="server-legacy-ssh") }}
                         {{ form.requires_legacy_ssh.label(class="form-check-label", for="server-legacy-ssh") }}
-                        <div class="form-text d-block">Включите, если сервер использует OpenSSH версии < 7.2. Обычно автоматически определяется при инициализации.</div>
+                        <div class="form-text d-block">Включите, если сервер использует OpenSSH версии < 7.2. Обычно
+                                автоматически определяется при инициализации.</div>
+                        </div>
+                        <div class="mb-3" id="password-field">
+                            <label for="serverPassword" class="form-label">Пароль для SSH</label>
+                            <input type="password" class="form-control" id="serverPassword" name="password">
+                            <div class="form-text">Пароль используется только для первоначальной настройки ключа доступа
+                                и не сохраняется.</div>
+                        </div>
                     </div>
-                    <div class="mb-3" id="password-field">
-                        <label for="serverPassword" class="form-label">Пароль для SSH</label>
-                        <input type="password" class="form-control" id="serverPassword" name="password">
-                        <div class="form-text">Пароль используется только для первоначальной настройки ключа доступа и не сохраняется.</div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                        {{ form.submit(class="btn btn-primary") }}
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-                    {{ form.submit(class="btn btn-primary") }}
-                </div>
             </form>
         </div>
     </div>
 </div>
 
 <!-- Delete Confirmation Modal -->
-<div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-labelledby="deleteConfirmModalLabel"
+    aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
@@ -159,18 +156,59 @@
                 <h5 class="modal-title" id="bulkImportLabel">
                     <i class="bi bi-cloud-arrow-up"></i> Массовый импорт серверов
                 </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <textarea id="bulkServersList" class="form-control" rows="10" placeholder="server1.example.com ubuntu mypass123 192.168.1.10 22&#10;server2.example.com root securepass 192.168.1.11 22&#10;server3.example.com admin password456 192.168.1.12 2222" style="background-color: #f8f9fa; font-family: monospace; font-size: 12px; border: 2px solid #e9ecef;"></textarea>
-                
-                <div class="alert alert-light mt-3 mb-0" style="background-color: #f1f3f5; border: 1px solid #dee2e6;">
+                <textarea id="bulkServersList" class="form-control" rows="10"
+                    placeholder="server1.example.com ubuntu mypass123 192.168.1.10 22&#10;server2.example.com root securepass 192.168.1.11 22&#10;server3.example.com admin password456 192.168.1.12 2222"
+                    style="background-color: #f8f9fa; font-family: monospace; font-size: 12px; border: 2px solid #e9ecef;"></textarea>
+
+                <div class="alert alert-light mt-3 mb-0" id="importInstructions"
+                    style="background-color: #f1f3f5; border: 1px solid #dee2e6;">
                     <small class="text-muted d-block">
                         📋 <strong>Формат:</strong> domain username password ip-address ssh-port
                     </small>
                     <small class="text-muted d-block mt-1">
                         💡 Каждый сервер на новой строке, данные разделяются пробелами
                     </small>
+                </div>
+
+                <!-- Блок ошибок (скрыт по умолчанию) -->
+                <div id="importError" class="alert alert-danger mt-3" style="display:none;"></div>
+
+                <!-- Блок результатов импорта -->
+                <div id="importResults" style="display:none;" class="mt-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">Результаты импорта:</h6>
+                    </div>
+
+                    <!-- Added -->
+                    <div id="resultsAdded" class="mb-2" style="display:none;">
+                        <div class="alert alert-success mb-1 py-2 px-3">
+                            <strong>✅ Добавлено: <span id="countAdded">0</span></strong>
+                        </div>
+                        <ul class="list-group list-group-flush small" id="listAdded"
+                            style="max-height: 150px; overflow-y: auto;"></ul>
+                    </div>
+
+                    <!-- Skipped -->
+                    <div id="resultsSkipped" class="mb-2" style="display:none;">
+                        <div class="alert alert-warning mb-1 py-2 px-3">
+                            <strong>⚠️ Пропущено: <span id="countSkipped">0</span></strong>
+                        </div>
+                        <ul class="list-group list-group-flush small" id="listSkipped"
+                            style="max-height: 150px; overflow-y: auto;"></ul>
+                    </div>
+
+                    <!-- Failed -->
+                    <div id="resultsFailed" class="mb-2" style="display:none;">
+                        <div class="alert alert-danger mb-1 py-2 px-3">
+                            <strong>❌ Ошибки: <span id="countFailed">0</span></strong>
+                        </div>
+                        <ul class="list-group list-group-flush small" id="listFailed"
+                            style="max-height: 150px; overflow-y: auto;"></ul>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -188,188 +226,238 @@
 
 {% block scripts %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const serverModal = document.getElementById('serverModal');
-    const passwordField = document.getElementById('password-field');
-    const serverForm = document.getElementById('serverForm');
-    const modalTitle = document.getElementById('serverModalLabel');
+    document.addEventListener('DOMContentLoaded', function () {
+        const serverModal = document.getElementById('serverModal');
+        const passwordField = document.getElementById('password-field');
+        const serverForm = document.getElementById('serverForm');
+        const modalTitle = document.getElementById('serverModalLabel');
 
-    serverModal.addEventListener('show.bs.modal', function (event) {
-        const button = event.relatedTarget;
-        const action = button.getAttribute('data-action');
-        
-        if (action === 'add') {
-            modalTitle.textContent = 'Добавить новый сервер';
-            serverForm.action = button.getAttribute('data-add-url');
-            passwordField.style.display = 'block';
-            // Очистка полей
-            serverForm.reset();
-        } else if (action === 'edit') {
-            modalTitle.textContent = 'Редактировать сервер';
-            const serverId = button.getAttribute('data-id');
-            const serverRow = document.getElementById(`server-${serverId}`);
-            
-            // Заполнение полей формы
-            document.getElementById('server-name').value = serverRow.querySelector('[data-field="name"]').textContent;
-            document.getElementById('server-ip').value = serverRow.querySelector('[data-field="ip_address"]').textContent;
-            document.getElementById('server-port').value = serverRow.querySelector('[data-field="ssh_port"]').textContent;
-            document.getElementById('server-username').value = serverRow.querySelector('[data-field="username"]').textContent;
-            
-            serverForm.action = `/api/servers/edit/${serverId}`;
-            passwordField.style.display = 'none';
-        }
-    });
+        serverModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const action = button.getAttribute('data-action');
 
-    const deleteModal = document.getElementById('deleteConfirmModal');
-    let serverIdToDelete = null;
+            if (action === 'add') {
+                modalTitle.textContent = 'Добавить новый сервер';
+                serverForm.action = button.getAttribute('data-add-url');
+                passwordField.style.display = 'block';
+                // Очистка полей
+                serverForm.reset();
+            } else if (action === 'edit') {
+                modalTitle.textContent = 'Редактировать сервер';
+                const serverId = button.getAttribute('data-id');
+                const serverRow = document.getElementById(`server-${serverId}`);
 
-    deleteModal.addEventListener('show.bs.modal', function (event) {
-        const button = event.relatedTarget;
-        serverIdToDelete = button.getAttribute('data-id');
-        const serverName = button.getAttribute('data-name');
-        deleteModal.querySelector('#serverNameToDelete').textContent = serverName;
-    });
+                // Заполнение полей формы
+                document.getElementById('server-name').value = serverRow.querySelector('[data-field="name"]').textContent;
+                document.getElementById('server-ip').value = serverRow.querySelector('[data-field="ip_address"]').textContent;
+                document.getElementById('server-port').value = serverRow.querySelector('[data-field="ssh_port"]').textContent;
+                document.getElementById('server-username').value = serverRow.querySelector('[data-field="username"]').textContent;
 
-    const confirmBtn = document.getElementById('confirmDeleteBtn');
-    confirmBtn.addEventListener('click', async function() {
-        if (!serverIdToDelete) return;
-
-        if (!confirm('Вы уверены, что хотите удалить этот сервер? Все связанные данные будут потеряны.')) {
-            return;
-        }
-
-        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-
-        try {
-            const response = await fetch(`/api/servers/delete/${serverIdToDelete}`, {
-                method: 'POST',
-                headers: {
-                    'X-CSRFToken': csrfToken
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                alert('✅ ' + data.message);
-                document.getElementById(`server-${serverIdToDelete}`).remove();
-                bootstrap.Modal.getInstance(deleteModal).hide();
-            } else {
-                alert('❌ ' + data.message);
+                serverForm.action = `/api/servers/edit/${serverId}`;
+                passwordField.style.display = 'none';
             }
-        } catch (error) {
-            console.error('Ошибка при удалении сервера:', error);
-            alert('❌ Произошла ошибка при отправке запроса.');
-        }
-    });
+        });
 
-    // Test Server Button Handler
-    document.querySelectorAll('.test-btn').forEach(button => {
-        button.addEventListener('click', async function() {
-            const serverId = this.getAttribute('data-id');
-            const btn = this;
-            const originalHTML = btn.innerHTML;
-            
-            // Show loading spinner
-            btn.disabled = true;
-            btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-            
+        const deleteModal = document.getElementById('deleteConfirmModal');
+        let serverIdToDelete = null;
+
+        deleteModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            serverIdToDelete = button.getAttribute('data-id');
+            const serverName = button.getAttribute('data-name');
+            deleteModal.querySelector('#serverNameToDelete').textContent = serverName;
+        });
+
+        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        confirmBtn.addEventListener('click', async function () {
+            if (!serverIdToDelete) return;
+
+            if (!confirm('Вы уверены, что хотите удалить этот сервер? Все связанные данные будут потеряны.')) {
+                return;
+            }
+
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
             try {
-                const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-                
-                const response = await fetch(`/api/servers/test/${serverId}`, {
+                const response = await fetch(`/api/servers/delete/${serverIdToDelete}`, {
                     method: 'POST',
                     headers: {
                         'X-CSRFToken': csrfToken
                     }
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {
-                    // Update status badge in table
-                    const statusCell = document.querySelector(`#server-${serverId} [data-field="status"]`);
-                    if (statusCell) {
-                        const badgeClass = data.status === 'online' ? 'bg-success' : 'bg-danger';
-                        statusCell.innerHTML = `<span class="badge ${badgeClass}">${data.status}</span>`;
-                    }
-                    
-                    alert(`✅ ${data.message}`);
+                    alert('✅ ' + data.message);
+                    document.getElementById(`server-${serverIdToDelete}`).remove();
+                    bootstrap.Modal.getInstance(deleteModal).hide();
                 } else {
-                    alert(`❌ Ошибка: ${data.message}`);
+                    alert('❌ ' + data.message);
                 }
             } catch (error) {
-                console.error('Test server error:', error);
-                alert('❌ Ошибка при проверке сервера');
-            } finally {
-                // Restore button
-                btn.disabled = false;
-                btn.innerHTML = originalHTML;
+                console.error('Ошибка при удалении сервера:', error);
+                alert('❌ Произошла ошибка при отправке запроса.');
             }
         });
-    });
-});
 
-// Обработчик для массового импорта серверов
-document.getElementById('submitBulkImport').addEventListener('click', function() {
-    const serversData = document.getElementById('bulkServersList').value.trim();
-    
-    if (!serversData) {
-        alert('❌ Пожалуйста, введите список серверов');
-        return;
-    }
-    
-    const lines = serversData.split('\n').filter(l => l.trim());
-    
-    if (!confirm(`🚀 Вы уверены? Будет добавлено ${lines.length} серверов.`)) {
-        return;
-    }
-    
-    // Отключить кнопку и показать загрузку
-    const btn = document.getElementById('submitBulkImport');
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Загрузка...';
-    
-    // Отправить AJAX запрос
-    fetch('/api/bulk-import-servers', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-        },
-        body: JSON.stringify({
-            servers_data: serversData
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        
-        if (data.success) {
-            // Закрыть модальное окно
-            const modal = bootstrap.Modal.getInstance(document.getElementById('bulkImportModal'));
-            modal.hide();
-            
-            // Очистить textarea
-            document.getElementById('bulkServersList').value = '';
-            
-            // Показать результаты
-            const message = `✅ Успешно добавлено: ${data.added}\n⚠️ Пропущено: ${data.skipped}\n❌ Ошибок: ${data.failed}`;
-            alert(message);
-            
-            // Перезагрузить таблицу
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            alert(`❌ Ошибка: ${data.message}`);
-        }
-    })
-    .catch(error => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        alert(`❌ Ошибка при отправке: ${error}`);
+        // Test Server Button Handler
+        document.querySelectorAll('.test-btn').forEach(button => {
+            button.addEventListener('click', async function () {
+                const serverId = this.getAttribute('data-id');
+                const btn = this;
+                const originalHTML = btn.innerHTML;
+
+                // Show loading spinner
+                btn.disabled = true;
+                btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+
+                try {
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+                    const response = await fetch(`/api/servers/test/${serverId}`, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRFToken': csrfToken
+                        }
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Update status badge in table
+                        const statusCell = document.querySelector(`#server-${serverId} [data-field="status"]`);
+                        if (statusCell) {
+                            const badgeClass = data.status === 'online' ? 'bg-success' : 'bg-danger';
+                            statusCell.innerHTML = `<span class="badge ${badgeClass}">${data.status}</span>`;
+                        }
+
+                        alert(`✅ ${data.message}`);
+                    } else {
+                        alert(`❌ Ошибка: ${data.message}`);
+                    }
+                } catch (error) {
+                    console.error('Test server error:', error);
+                    alert('❌ Ошибка при проверке сервера');
+                } finally {
+                    // Restore button
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                }
+            });
+        });
     });
-});
+
+    // Обработчик для массового импорта серверов
+    document.getElementById('submitBulkImport').addEventListener('click', function () {
+        const serversData = document.getElementById('bulkServersList').value.trim();
+        const errorContainer = document.getElementById('importError');
+
+        // Сброс ошибок
+        errorContainer.style.display = 'none';
+        errorContainer.textContent = '';
+
+        if (!serversData) {
+            errorContainer.textContent = '❌ Пожалуйста, введите список серверов';
+            errorContainer.style.display = 'block';
+            return;
+        }
+
+        // UI Elements
+        const btn = document.getElementById('submitBulkImport');
+        const cancelBtn = document.querySelector('#bulkImportModal .btn-secondary');
+        const textarea = document.getElementById('bulkServersList');
+        const instructions = document.getElementById('importInstructions');
+        const resultsContainer = document.getElementById('importResults');
+
+        const originalText = btn.innerHTML;
+
+        // Disable UI
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Загрузка...';
+        textarea.disabled = true;
+
+        // Отправить AJAX запрос
+        fetch('/api/bulk-import-servers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify({
+                servers_data: serversData
+            })
+        })
+            .then(response => response.json())
+            .then(data => {
+                btn.style.display = 'none'; // Скрываем кнопку "Сохранить"
+
+                // Меняем кнопку "Отмена" на "Закрыть" и добавляем reload
+                cancelBtn.innerHTML = 'Закрыть';
+                cancelBtn.classList.remove('btn-secondary');
+                cancelBtn.classList.add('btn-primary');
+                cancelBtn.onclick = function () {
+                    location.reload();
+                };
+
+                // Скрываем ввод и показываем результаты
+                textarea.style.display = 'none';
+                instructions.style.display = 'none';
+                resultsContainer.style.display = 'block';
+
+                if (data.success) {
+                    // Helper to create list items
+                    const createListItem = (item, type) => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item d-flex justify-content-between align-items-center';
+
+                        let content = `<div><strong>${item.name}</strong> <span class="text-muted">(${item.ip})</span></div>`;
+
+                        if (type === 'failed' || type === 'skipped') {
+                            content += `<span class="badge bg-light text-dark border">${item.reason}</span>`;
+                        }
+
+                        li.innerHTML = content;
+                        return li;
+                    };
+
+                    // Process Added
+                    const addedList = document.getElementById('listAdded');
+                    document.getElementById('countAdded').textContent = data.added.length;
+                    if (data.added.length > 0) {
+                        document.getElementById('resultsAdded').style.display = 'block';
+                        data.added.forEach(item => addedList.appendChild(createListItem(item, 'added')));
+                    }
+
+                    // Process Skipped
+                    const skippedList = document.getElementById('listSkipped');
+                    document.getElementById('countSkipped').textContent = data.skipped.length;
+                    if (data.skipped.length > 0) {
+                        document.getElementById('resultsSkipped').style.display = 'block';
+                        data.skipped.forEach(item => skippedList.appendChild(createListItem(item, 'skipped')));
+                    }
+
+                    // Process Failed
+                    const failedList = document.getElementById('listFailed');
+                    document.getElementById('countFailed').textContent = data.failed.length;
+                    if (data.failed.length > 0) {
+                        document.getElementById('resultsFailed').style.display = 'block';
+                        data.failed.forEach(item => failedList.appendChild(createListItem(item, 'failed')));
+                    }
+
+                } else {
+                    // Fallback for general error
+                    errorContainer.textContent = `❌ Ошибка: ${data.message}`;
+                    errorContainer.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                textarea.disabled = false;
+                errorContainer.textContent = `❌ Ошибка при отправке: ${error}`;
+                errorContainer.style.display = 'block';
+            });
+    });
 </script>
 {% endblock %}
