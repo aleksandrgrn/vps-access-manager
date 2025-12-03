@@ -11,6 +11,21 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import db
 
+# Вспомогательная таблица для связи many-to-many между Server и ServerCategory
+server_category_association = db.Table(
+    "server_category_association",
+    db.Column(
+        "server_id", db.Integer, db.ForeignKey("servers.id", ondelete="CASCADE"), primary_key=True
+    ),
+    db.Column(
+        "category_id",
+        db.Integer,
+        db.ForeignKey("server_categories.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    db.Column("created_at", db.TIMESTAMP, server_default=db.func.now()),
+)
+
 
 class User(UserMixin, db.Model):
     """Модель пользователя системы."""
@@ -43,6 +58,25 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
 
+class ServerCategory(db.Model):
+    """Модель категории сервера."""
+
+    __tablename__ = "server_categories"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    color = db.Column(db.String(7), default="#6c757d", nullable=False)  # HEX color code
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+
+    # Relationships
+    servers = db.relationship(
+        "Server", secondary=server_category_association, back_populates="categories", lazy="dynamic"
+    )
+
+    def __repr__(self) -> str:
+        return f"<ServerCategory {self.name}>"
+
+
 class Server(db.Model):
     """Модель VPS сервера."""
 
@@ -65,6 +99,12 @@ class Server(db.Model):
     access_key = db.relationship("SSHKey", foreign_keys=[access_key_id], backref="server_access")
     deployments = db.relationship(
         "KeyDeployment", back_populates="server", lazy="dynamic", cascade="all, delete-orphan"
+    )
+    categories = db.relationship(
+        "ServerCategory",
+        secondary=server_category_association,
+        back_populates="servers",
+        lazy="dynamic",
     )
 
 
