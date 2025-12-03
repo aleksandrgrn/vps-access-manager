@@ -107,6 +107,10 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     app.register_blueprint(keys.bp, url_prefix="/api")
     app.register_blueprint(deployments.bp, url_prefix="/api")
 
+    from app.routes import categories
+
+    app.register_blueprint(categories.bp, url_prefix="/api")
+
     # Загрузчик пользователя для Flask-Login
     from app.models import User
 
