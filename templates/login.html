@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,7 +14,7 @@
             display: flex;
             align-items: center;
         }
-        
+
         .login-card {
             backdrop-filter: blur(10px);
             background: rgba(255, 255, 255, 0.95);
@@ -21,12 +22,12 @@
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
         }
-        
+
         .login-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4);
         }
-        
+
         .login-header {
             background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
             color: white;
@@ -34,17 +35,17 @@
             border-radius: 20px 20px 0 0;
             text-align: center;
         }
-        
+
         .login-header i {
             font-size: 3rem;
             margin-bottom: 10px;
         }
-        
+
         .form-control:focus {
             border-color: #4e73df;
             box-shadow: 0 0 0 0.2rem rgba(30, 60, 114, 0.25);
         }
-        
+
         .btn-login {
             background: linear-gradient(135deg, #4e73df 0%, #224abe 100%);
             border: none;
@@ -52,19 +53,19 @@
             font-weight: 600;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-        
+
         .btn-login:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(30, 60, 114, 0.4);
             background: linear-gradient(135deg, #224abe 0%, #4e73df 100%);
         }
-        
+
         .input-group-text {
             background-color: #4e73df;
             color: white;
             border: none;
         }
-        
+
         .footer-text {
             text-align: center;
             color: #6c757d;
@@ -73,6 +74,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="row justify-content-center">
@@ -83,26 +85,26 @@
                         <h2 class="mb-0">VPS Manager</h2>
                         <p class="mb-0 mt-2" style="opacity: 0.9;">Безопасный вход в систему</p>
                     </div>
-                    
+
                     <div class="card-body p-4">
                         <!-- Flash Messages (Soft Red-Green Style) -->
                         {% with messages = get_flashed_messages(with_categories=true) %}
-                          {% if messages %}
-                            {% for category, message in messages %}
-                              <div class="alert alert-dismissible fade show mb-3" role="alert" 
-                                   style="background-color: {% if category == 'error' %}#f8d7da{% else %}#d4edda{% endif %}; 
+                        {% if messages %}
+                        {% for category, message in messages %}
+                        <div class="alert alert-dismissible fade show mb-3" role="alert" style="background-color: {% if category == 'error' %}#f8d7da{% else %}#d4edda{% endif %}; 
                                           color: {% if category == 'error' %}#721c24{% else %}#155724{% endif %}; 
                                           border: 1px solid {% if category == 'error' %}#f5c6cb{% else %}#c3e6cb{% endif %};
                                           border-radius: 6px;
                                           padding: 12px 16px;">
-                                <i class="bi {% if category == 'error' %}bi-exclamation-triangle{% else %}bi-check-circle{% endif %} me-2"></i>
-                                {{ message }}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                              </div>
-                            {% endfor %}
-                          {% endif %}
+                            <i
+                                class="bi {% if category == 'error' %}bi-exclamation-triangle{% else %}bi-check-circle{% endif %} me-2"></i>
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                        {% endfor %}
+                        {% endif %}
                         {% endwith %}
-                        
+
                         <form method="POST" class="mt-4">
                             {{ form.hidden_tag() }}
                             <div class="mb-3">
@@ -116,7 +118,7 @@
                                     {{ form.username(class="form-control", required=True, autofocus=True) }}
                                 </div>
                             </div>
-                            
+
                             <div class="mb-4">
                                 <label class="form-label fw-semibold">
                                     <i class="bi bi-lock-fill me-2"></i>Пароль
@@ -128,22 +130,23 @@
                                     {{ form.password(class="form-control", required=True) }}
                                 </div>
                             </div>
-                            
+
                             <button type="submit" class="btn btn-primary btn-login w-100">
                                 <i class="bi bi-box-arrow-in-right me-2"></i>Войти в систему
                             </button>
                         </form>
                     </div>
                 </div>
-                
+
                 <p class="footer-text">
                     <i class="bi bi-shield-check me-2"></i>
-                    VPS Access Manager v2.0.13
+                    VPS Access Manager v2.2.17
                 </p>
             </div>
         </div>
     </div>
-    
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
+
 </html>
