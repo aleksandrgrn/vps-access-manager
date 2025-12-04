@@ -148,242 +148,317 @@ def add_server() -> Any:
 
     ЯКОРЬ: БД обновляется ТОЛЬКО после успешного развёртывания ключа!
     """
-    form = ServerForm()
-
-    if not form.validate_on_submit():
-        for field, errors in form.errors.items():
-            for error in errors:
-                flash(f'Ошибка в поле "{getattr(form, field).label.text}": {error}', "danger")
-        return redirect(url_for("servers.servers"))
-
-    ip_address = form.ip_address.data
-    port = form.ssh_port.data
-    username = form.username.data
-    password = request.form.get("password")
-
-    # ЭТАП 0: Проверка на дубликаты
-    existing_server = Server.query.filter_by(
-        user_id=current_user.id, ip_address=ip_address, ssh_port=port
-    ).first()
-
-    if existing_server:
-        flash(f"Сервер {ip_address}:{port} уже добавлен.", "danger")
-        add_log("add_server_duplicate", details={"ip": ip_address, "port": port})
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 0.1: Валидация пароля
-    if not password:
-        flash("Пароль не может быть пустым.", "danger")
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 1: Инициализация сервера (определение версии OpenSSH)
     try:
-        init_result = initialize_server(ip_address, port, username, password)
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "Данные не предоставлены"}), 400
 
-        if not init_result["success"]:
-            flash(f"Ошибка инициализации: {init_result['message']}", "danger")
-            add_log(
-                "add_server_failed", details={"ip": ip_address, "error": init_result["message"]}
+        # Валидация обязательных полей
+        required_fields = ["name", "ip_address", "ssh_port", "username", "password"]
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"success": False, "message": f"Поле '{field}' обязательно"}), 400
+
+        ip_address = data["ip_address"]
+        port = data["ssh_port"]
+        username = data["username"]
+        password = data.get("password")
+        name = data["name"]
+        requires_legacy_ssh_param = data.get("requires_legacy_ssh", False)
+
+        # ЭТАП 0: Проверка на дубликаты
+        existing_server = Server.query.filter_by(
+            user_id=current_user.id, ip_address=ip_address, ssh_port=port
+        ).first()
+
+        if existing_server:
+            add_log("add_server_duplicate", details={"ip": ip_address, "port": port})
+            return (
+                jsonify({"success": False, "message": f"Сервер {ip_address}:{port} уже добавлен."}),
+                400,
             )
-            return redirect(url_for("servers.servers"))
 
-        openssh_version = init_result["openssh_version"]
-        requires_legacy_ssh = init_result["requires_legacy_ssh"]
-
-        # Переопределяем, если пользователь явно указал в форме
-        if form.requires_legacy_ssh.data is not None:
-            requires_legacy_ssh = form.requires_legacy_ssh.data
-
-        flash(f"Сервер инициализирован. OpenSSH версия: {openssh_version}", "info")
-
-    except Exception as e:
-        logger.error(f"[ADD_SERVER_ERROR] Ошибка инициализации: {str(e)}")
-        flash(f"Ошибка при инициализации сервера: {str(e)}", "danger")
-        add_log("add_server_exception", details={"ip": ip_address, "error": str(e)})
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 2: Генерация уникального root ключа
-    try:
-        logger.info(f"[ADD_SERVER] Генерация root ключа для {ip_address}")
-        private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key("rsa")
-        fingerprint = ssh_keys.get_fingerprint(public_key_ssh)
-
-        if not fingerprint or SSHKey.query.filter_by(fingerprint=fingerprint).first():
-            flash("Не удалось сгенерировать уникальный ключ. Попробуйте еще раз.", "danger")
-            return redirect(url_for("servers.servers"))
-
-    except Exception as e:
-        logger.error(f"[ADD_SERVER_ERROR] Ошибка генерации ключа: {str(e)}")
-        flash(f"Ошибка при генерации ключа: {str(e)}", "danger")
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 3: Сохранение ключа в БД
-    try:
-        encryption_key = os.environ.get("ENCRYPTION_KEY")
-        if not encryption_key:
-            flash("ENCRYPTION_KEY не установлен на сервере", "danger")
-            return redirect(url_for("servers.servers"))
-
-        encrypted_private_key = ssh_keys.encrypt_private_key(private_key_pem, encryption_key)
-
-        root_key_name = f"root_{form.name.data}"
-        new_root_key = SSHKey(
-            name=root_key_name,
-            public_key=public_key_ssh,
-            private_key_encrypted=encrypted_private_key,
-            fingerprint=fingerprint,
-            key_type="rsa",
-            user_id=current_user.id,
-        )
-        db.session.add(new_root_key)
-        db.session.flush()  # Получаем ID ключа
-        logger.info(f"[ADD_SERVER] Создан root ключ {root_key_name} (ID: {new_root_key.id})")
-
-    except Exception as e:
-        logger.error(f"[ADD_SERVER_ERROR] Ошибка сохранения ключа: {str(e)}")
-        flash(f"Ошибка при сохранении ключа в БД: {str(e)}", "danger")
-        db.session.rollback()
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 4: Развёртывание ключа на сервере (КРИТИЧНО!)
-    try:
-        logger.info(f"[ADD_SERVER] Развёртывание ключа на {ip_address}")
-
-        # Разворачиваем ключ через SSH
-        conn = SSHConnection(ip_address, port, username)
-        conn_success, conn_error = conn.connect_with_password(password)
-
-        # Удаляем пароль из памяти сразу после использования
-        del password
-
-        if not conn_success:
-            logger.warning(f"[ADD_SERVER_DEPLOY_FAILED] {conn_error}")
-            flash(f"Не удалось подключиться для развёртывания ключа: {conn_error}", "danger")
-            db.session.rollback()
-            return redirect(url_for("servers.servers"))
-
+        # ЭТАП 1: Инициализация сервера (определение версии OpenSSH)
         try:
-            # Валидация ключа
-            if not ssh_keys.validate_ssh_public_key(public_key_ssh):
-                flash("Невалидный формат публичного ключа", "danger")
-                db.session.rollback()
-                return redirect(url_for("servers.servers"))
+            init_result = initialize_server(ip_address, port, username, password)
 
-            # Шаг 1: Создаём .ssh директорию
-            cmd1_success, _, stderr1 = conn.execute(
-                "mkdir -p ~/.ssh && chmod 700 ~/.ssh", timeout=15
-            )
-            if not cmd1_success:
-                logger.error(f"[ADD_SERVER_MKDIR_FAILED] {stderr1}")
-                flash(f"Не удалось создать .ssh: {stderr1}", "danger")
-                db.session.rollback()
-                return redirect(url_for("servers.servers"))
-
-            # Шаг 2: Проверяем, не установлен ли уже ключ
-            cmd2_success, existing_keys, _ = conn.execute(
-                "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''", timeout=10
-            )
-            if public_key_ssh.strip() in existing_keys:
-                logger.info(f"[ADD_SERVER_KEY_EXISTS] Ключ уже установлен на {ip_address}")
-            else:
-                # Шаг 3: Добавляем ключ
-                escaped_key = public_key_ssh.strip().replace("'", "'\\''")
-                cmd3_success, _, stderr3 = conn.execute(
-                    f"echo '{escaped_key}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",  # noqa: E501
-                    timeout=15,
+            if not init_result["success"]:
+                add_log(
+                    "add_server_failed", details={"ip": ip_address, "error": init_result["message"]}
+                )
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": f"Ошибка инициализации: {init_result['message']}",
+                        }
+                    ),
+                    400,
                 )
 
-                if not cmd3_success:
-                    logger.error(f"[ADD_SERVER_APPEND_FAILED] {stderr3}")
-                    flash(f"Не удалось добавить ключ: {stderr3}", "danger")
+            openssh_version = init_result["openssh_version"]
+            requires_legacy_ssh = init_result["requires_legacy_ssh"]
+
+            # Переопределяем, если пользователь явно указал
+            if requires_legacy_ssh_param:
+                requires_legacy_ssh = True
+
+        except Exception as e:
+            logger.error(f"[ADD_SERVER_ERROR] Ошибка инициализации: {str(e)}")
+            add_log("add_server_exception", details={"ip": ip_address, "error": str(e)})
+            return (
+                jsonify(
+                    {"success": False, "message": f"Ошибка при инициализации сервера: {str(e)}"}
+                ),
+                500,
+            )
+
+        # ЭТАП 2: Генерация уникального root ключа
+        try:
+            logger.info(f"[ADD_SERVER] Генерация root ключа для {ip_address}")
+            private_key_pem, public_key_ssh = ssh_keys.generate_ssh_key("rsa")
+            fingerprint = ssh_keys.get_fingerprint(public_key_ssh)
+
+            if not fingerprint or SSHKey.query.filter_by(fingerprint=fingerprint).first():
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": "Не удалось сгенерировать ключ. Попробуйте снова.",
+                        }
+                    ),
+                    500,
+                )
+
+        except Exception as e:
+            logger.error(f"[ADD_SERVER_ERROR] Ошибка генерации ключа: {str(e)}")
+            return (
+                jsonify({"success": False, "message": f"Ошибка при генерации ключа: {str(e)}"}),
+                500,
+            )
+
+        # ЭТАП 3: Сохранение ключа в БД
+        try:
+            encryption_key = os.environ.get("ENCRYPTION_KEY")
+            if not encryption_key:
+                return (
+                    jsonify(
+                        {"success": False, "message": "ENCRYPTION_KEY не установлен на сервере"}
+                    ),
+                    500,
+                )
+
+            encrypted_private_key = ssh_keys.encrypt_private_key(private_key_pem, encryption_key)
+
+            root_key_name = f"root_{name}"
+            new_root_key = SSHKey(
+                name=root_key_name,
+                public_key=public_key_ssh,
+                private_key_encrypted=encrypted_private_key,
+                fingerprint=fingerprint,
+                key_type="rsa",
+                user_id=current_user.id,
+            )
+            db.session.add(new_root_key)
+            db.session.flush()  # Получаем ID ключа
+            logger.info(f"[ADD_SERVER] Создан root ключ {root_key_name} (ID: {new_root_key.id})")
+
+        except Exception as e:
+            logger.error(f"[ADD_SERVER_ERROR] Ошибка сохранения ключа: {str(e)}")
+            db.session.rollback()
+            return (
+                jsonify(
+                    {"success": False, "message": f"Ошибка при сохранении ключа в БД: {str(e)}"}
+                ),
+                500,
+            )
+
+        # ЭТАП 4: Развёртывание ключа на сервере (КРИТИЧНО!)
+        try:
+            logger.info(f"[ADD_SERVER] Развёртывание ключа на {ip_address}")
+
+            # Разворачиваем ключ через SSH
+            conn = SSHConnection(ip_address, port, username)
+            conn_success, conn_error = conn.connect_with_password(password)
+
+            # Удаляем пароль из памяти сразу после использования
+            del password
+
+            if not conn_success:
+                logger.warning(f"[ADD_SERVER_DEPLOY_FAILED] {conn_error}")
+                db.session.rollback()
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": f"Ошибка развёртывания ключа: {conn_error}",
+                        }
+                    ),
+                    400,
+                )
+
+            try:
+                # Валидация ключа
+                if not ssh_keys.validate_ssh_public_key(public_key_ssh):
                     db.session.rollback()
-                    return redirect(url_for("servers.servers"))
-
-            logger.info(f"[ADD_SERVER_DEPLOY_SUCCESS] Ключ успешно развёрнут на {ip_address}")
-        finally:
-            conn.close()
-
-    except Exception as e:
-        logger.error(f"[ADD_SERVER_ERROR] Ошибка развёртывания: {str(e)}")
-        flash(f"Ошибка при развёртывании ключа: {str(e)}", "danger")
-        db.session.rollback()
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 5: Сохранение сервера в БД (ТОЛЬКО после успешного развёртывания!)
-    try:
-        new_server = Server(
-            name=form.name.data,
-            ip_address=ip_address,
-            ssh_port=port,
-            username=username,
-            user_id=current_user.id,
-            status="online",
-            openssh_version=openssh_version,
-            requires_legacy_ssh=requires_legacy_ssh,
-            access_key_id=new_root_key.id,
-        )
-        db.session.add(new_server)
-        db.session.flush()
-        logger.info(f"[ADD_SERVER] Создан сервер {form.name.data} (ID: {new_server.id})")
-
-        # Привязка категорий, если переданы
-        category_ids = request.form.getlist("category_ids", type=int)
-        if category_ids:
-            for cat_id in category_ids:
-                category = ServerCategory.query.get(cat_id)
-                if category:
-                    new_server.categories.append(category)
-                    logger.info(
-                        f"[ADD_SERVER] Привязана категория {category.name} "
-                        f"к серверу {new_server.id}"
+                    return (
+                        jsonify(
+                            {"success": False, "message": "Невалидный формат публичного ключа"}
+                        ),
+                        400,
                     )
+
+                # Шаг 1: Создаём .ssh директорию
+                cmd1_success, _, stderr1 = conn.execute(
+                    "mkdir -p ~/.ssh && chmod 700 ~/.ssh", timeout=15
+                )
+                if not cmd1_success:
+                    logger.error(f"[ADD_SERVER_MKDIR_FAILED] {stderr1}")
+                    db.session.rollback()
+                    return (
+                        jsonify(
+                            {"success": False, "message": f"Не удалось создать .ssh: {stderr1}"}
+                        ),
+                        500,
+                    )
+
+                # Шаг 2: Проверяем, не установлен ли уже ключ
+                cmd2_success, existing_keys, _ = conn.execute(
+                    "cat ~/.ssh/authorized_keys 2>/dev/null || echo ''", timeout=10
+                )
+                if public_key_ssh.strip() in existing_keys:
+                    logger.info(f"[ADD_SERVER_KEY_EXISTS] Ключ уже установлен на {ip_address}")
+                else:
+                    # Шаг 3: Добавляем ключ
+                    escaped_key = public_key_ssh.strip().replace("'", "'\\''")
+                    cmd3_success, _, stderr3 = conn.execute(
+                        f"echo '{escaped_key}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys",  # noqa: E501
+                        timeout=15,
+                    )
+
+                    if not cmd3_success:
+                        logger.error(f"[ADD_SERVER_APPEND_FAILED] {stderr3}")
+                        db.session.rollback()
+                        return (
+                            jsonify(
+                                {
+                                    "success": False,
+                                    "message": f"Не удалось добавить ключ: {stderr3}",
+                                }
+                            ),
+                            500,
+                        )
+
+                logger.info(f"[ADD_SERVER_DEPLOY_SUCCESS] Ключ успешно развёрнут на {ip_address}")
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"[ADD_SERVER_ERROR] Ошибка развёртывания: {str(e)}")
+            db.session.rollback()
+            return (
+                jsonify({"success": False, "message": f"Ошибка при развёртывании ключа: {str(e)}"}),
+                500,
+            )
+
+        # ЭТАП 5: Сохранение сервера в БД (ТОЛЬКО после успешного развёртывания!)
+        try:
+            new_server = Server(
+                name=name,
+                ip_address=ip_address,
+                ssh_port=port,
+                username=username,
+                user_id=current_user.id,
+                status="online",
+                openssh_version=openssh_version,
+                requires_legacy_ssh=requires_legacy_ssh,
+                access_key_id=new_root_key.id,
+            )
+            db.session.add(new_server)
             db.session.flush()
+            logger.info(f"[ADD_SERVER] Создан сервер {name} (ID: {new_server.id})")
+
+            # Привязка категорий, если переданы
+            category_ids = data.get("category_ids", [])
+            if category_ids:
+                for cat_id in category_ids:
+                    category = ServerCategory.query.get(cat_id)
+                    if category:
+                        new_server.categories.append(category)
+                        logger.info(
+                            f"[ADD_SERVER] Привязана категория {category.name} "
+                            f"к серверу {new_server.id}"
+                        )
+                db.session.flush()
+
+        except Exception as e:
+            logger.error(f"[ADD_SERVER_ERROR] Ошибка сохранения сервера: {str(e)}")
+            db.session.rollback()
+            return (
+                jsonify(
+                    {"success": False, "message": f"Ошибка при сохранении сервера в БД: {str(e)}"}
+                ),
+                500,
+            )
+
+        # ЭТАП 6: Создание KeyDeployment
+        try:
+            deployment = KeyDeployment(
+                ssh_key_id=new_root_key.id,
+                server_id=new_server.id,
+                deployed_by=current_user.id,
+                deployed_at=datetime.now(timezone.utc),
+            )
+            db.session.add(deployment)
+            db.session.commit()
+            logger.info(
+                f"[ADD_SERVER] KeyDeployment создан: "
+                f"ключ {new_root_key.id} -> сервер {new_server.id}"
+            )
+
+            add_log(
+                "add_server",
+                target=new_server.name,
+                details={
+                    "ip": new_server.ip_address,
+                    "key_id": new_root_key.id,
+                    "openssh_version": openssh_version,
+                },
+            )
+
+            return (
+                jsonify(
+                    {
+                        "success": True,
+                        "message": f"Сервер успешно добавлен. OpenSSH версия: {openssh_version}",
+                    }
+                ),
+                200,
+            )
+
+        except Exception as e:
+            logger.error(f"[ADD_SERVER_ERROR] Ошибка создания deployment: {str(e)}")
+            db.session.rollback()
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": f"Ошибка при создании записи развертывания: {str(e)}",
+                    }
+                ),
+                500,
+            )
 
     except Exception as e:
-        logger.error(f"[ADD_SERVER_ERROR] Ошибка сохранения сервера: {str(e)}")
-        flash(f"Ошибка при сохранении сервера в БД: {str(e)}", "danger")
-        db.session.rollback()
-        return redirect(url_for("servers.servers"))
-
-    # ЭТАП 6: Создание KeyDeployment
-    try:
-        deployment = KeyDeployment(
-            ssh_key_id=new_root_key.id,
-            server_id=new_server.id,
-            deployed_by=current_user.id,
-            deployed_at=datetime.now(timezone.utc),
-        )
-        db.session.add(deployment)
-        db.session.commit()
-        logger.info(
-            f"[ADD_SERVER] KeyDeployment создан: ключ {new_root_key.id} -> сервер {new_server.id}"
-        )
-
-        add_log(
-            "add_server",
-            target=new_server.name,
-            details={
-                "ip": new_server.ip_address,
-                "key_id": new_root_key.id,
-                "openssh_version": openssh_version,
-            },
-        )
-        flash(f"✅ Сервер успешно добавлен. OpenSSH версия: {openssh_version}", "success")
-
-    except Exception as e:
-        logger.error(f"[ADD_SERVER_ERROR] Ошибка создания deployment: {str(e)}")
-        flash(f"Ошибка при создании записи развертывания: {str(e)}", "danger")
-        db.session.rollback()
-        return redirect(url_for("servers.servers"))
-
-    return redirect(url_for("servers.servers"))
+        logger.error(f"[ADD_SERVER_FATAL] Непредвиденная ошибка: {str(e)}")
+        return jsonify({"success": False, "message": f"Непредвиденная ошибка: {str(e)}"}), 500
 
 
 @bp.route("/servers/edit/<int:server_id>", methods=["POST"])
 @login_required
 def edit_server(server_id: int) -> Tuple[Dict[str, Any], int]:
     """
-    Редактирование данных сервера.
+    Редактирование данных сервера и его категорий.
 
     Args:
         server_id: ID сервера
@@ -398,33 +473,55 @@ def edit_server(server_id: int) -> Tuple[Dict[str, Any], int]:
         if server.user_id != current_user.id:
             return jsonify({"success": False, "message": "Доступ запрещен"}), 403
 
-        form = ServerForm()
-        if form.validate_on_submit():
-            server.name = form.name.data
-            server.ip_address = form.ip_address.data
-            server.ssh_port = form.ssh_port.data
-            server.username = form.username.data
-            server.requires_legacy_ssh = form.requires_legacy_ssh.data
-            db.session.commit()
+        # Получение данных из JSON
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "Отсутствуют данные запроса"}), 400
 
-            logger.info(
-                f"[EDIT_SERVER] Сервер {server.name} обновлён. "
-                f"Legacy SSH: {server.requires_legacy_ssh}"
-            )
-            add_log(
-                "edit_server",
-                target=server.name,
-                details={"requires_legacy_ssh": server.requires_legacy_ssh},
-            )
-            flash("Данные сервера успешно обновлены.", "success")
-            return jsonify({"success": True, "message": "Сервер обновлён"}), 200
-        else:
-            errors = []
-            for field, field_errors in form.errors.items():
-                for error in field_errors:
-                    errors.append(f"{getattr(form, field).label.text}: {error}")
+        # Валидация обязательных полей
+        required_fields = ["name", "ip_address", "ssh_port", "username"]
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"success": False, "message": f"Поле '{field}' обязательно"}), 400
 
-            return jsonify({"success": False, "message": "Ошибки валидации", "errors": errors}), 400
+        # Обновление основных полей
+        server.name = data.get("name")
+        server.ip_address = data.get("ip_address")
+        server.ssh_port = data.get("ssh_port")
+        server.username = data.get("username")
+        # requires_legacy_ssh НЕ обновляется при редактировании
+
+        # Обновление категорий
+        category_ids = data.get("category_ids", [])
+        # Очищаем существующие категории (для lazy="dynamic" используем remove)
+        for category in server.categories.all():
+            server.categories.remove(category)
+        # Добавляем новые категории
+        if category_ids:
+            for cat_id in category_ids:
+                category = ServerCategory.query.get(cat_id)
+                if category:
+                    server.categories.append(category)
+                    logger.info(
+                        f"[EDIT_SERVER] Привязана категория {category.name} "
+                        f"к серверу {server.id}"
+                    )
+
+        db.session.commit()
+
+        logger.info(
+            f"[EDIT_SERVER] Сервер {server.name} обновлён. "
+            f"Legacy SSH: {server.requires_legacy_ssh}, Категорий: {len(category_ids)}"
+        )
+        add_log(
+            "edit_server",
+            target=server.name,
+            details={
+                "requires_legacy_ssh": server.requires_legacy_ssh,
+                "categories": len(category_ids),
+            },
+        )
+        return jsonify({"success": True, "message": "Сервер обновлён"}), 200
 
     except Exception as e:
         logger.error(f"[EDIT_SERVER_ERROR] {str(e)}")

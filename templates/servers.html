@@ -7,13 +7,13 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2">Управление серверами</h1>
         <div>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#serverModal" data-action="add"
+            <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#manageCategoriesModal">
+                <i class="bi bi-tags"></i> Категории
+            </button>
+            <button class="btn btn-primary ms-2" data-bs-toggle="modal" data-bs-target="#serverModal" data-action="add"
                 data-add-url="{{ url_for('servers.add_server') }}">
 
                 <i class="bi bi-plus-circle me-1"></i> Добавить сервер
-            </button>
-            <button class="btn btn-secondary ms-2" data-bs-toggle="modal" data-bs-target="#manageCategoriesModal">
-                <i class="bi bi-tags"></i> Категории
             </button>
             <button type="button" class="btn btn-success ms-2" data-bs-toggle="modal" data-bs-target="#bulkImportModal">
                 <i class="bi bi-cloud-arrow-up"></i> Массовый импорт
@@ -305,6 +305,9 @@
             const button = event.relatedTarget;
             const action = button.getAttribute('data-action');
 
+            // Элемент с чекбоксом Legacy SSH
+            const legacySshField = document.querySelector('.form-check:has(#server-legacy-ssh)');
+
             // Загружаем категории при каждом открытии модалки
             loadCategories();
 
@@ -312,6 +315,7 @@
                 modalTitle.textContent = 'Добавить новый сервер';
                 serverForm.action = button.getAttribute('data-add-url');
                 passwordField.style.display = 'block';
+                legacySshField.style.display = 'block'; // Показываем при добавлении
                 // Очистка полей
                 serverForm.reset();
                 // Сбрасываем чекбоксы категорий
@@ -329,8 +333,12 @@
                 document.getElementById('server-port').value = serverRow.querySelector('[data-field="ssh_port"]').textContent;
                 document.getElementById('server-username').value = serverRow.querySelector('[data-field="username"]').textContent;
 
+
+                // Получаем и отмечаем категории сервера
+                loadServerCategories(serverId);
                 serverForm.action = `/api/servers/edit/${serverId}`;
                 passwordField.style.display = 'none';
+                legacySshField.style.display = 'none'; // Скрываем при редактировании
             }
         });
 
@@ -351,13 +359,13 @@
                 ip_address: formData.get('ip_address'),
                 ssh_port: formData.get('ssh_port'),
                 username: formData.get('username'),
-                requires_legacy_ssh: formData.get('requires_legacy_ssh') ? true : false,
                 category_ids: categoryIds
             };
 
-            // Для добавления нового сервера нужен пароль
+            // Для добавления нового сервера нужен пароль и Legacy SSH
             if (serverForm.action.includes('/add')) {
                 requestData.password = formData.get('password');
+                requestData.requires_legacy_ssh = formData.get('requires_legacy_ssh') ? true : false;
             }
 
             const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
@@ -619,7 +627,7 @@
                             <div class="d-flex align-items-center">
                                 <span class="rounded-circle me-2" style="width: 12px; height: 12px; background-color: ${cat.color}; display: inline-block;"></span>
                                 <span>${cat.name}</span>
-                                <span class="badge bg-light text-dark ms-2 rounded-pill border">${cat.server_count || 0}</span>
+                                <span class="badge bg-light text-dark ms-2 rounded-pill border">${cat.count || 0}</span>
                             </div>
                             <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${cat.id})" title="Удалить">
                                 <i class="bi bi-trash"></i>
@@ -676,6 +684,41 @@
             if (categoriesList) {
                 categoriesList.innerHTML = '<div class="text-danger text-center">Ошибка загрузки категорий</div>';
             }
+        }
+    }
+
+    async function loadServerCategories(serverId) {
+        try {
+            // Получаем данные всех серверов
+            const response = await fetch('/api/servers');
+            const data = await response.json();
+
+            if (!data.success) {
+                console.error('Ошибка загрузки серверов:', data.message);
+                return;
+            }
+
+            // Находим текущий сервер
+            const server = data.servers.find(s => s.id === parseInt(serverId));
+            if (!server) {
+                console.error('Сервер не найден');
+                return;
+            }
+
+            // Получаем ID категорий текущего сервера
+            const serverCategoryIds = server.categories.map(cat => cat.id);
+
+            // Ждём, пока категории загрузятся (если ещё не загружены)
+            setTimeout(() => {
+                // Отмечаем чекбоксы для категорий сервера
+                document.querySelectorAll('#addServerCategoryList input[type="checkbox"]').forEach(checkbox => {
+                    const catId = parseInt(checkbox.value);
+                    checkbox.checked = serverCategoryIds.includes(catId);
+                });
+            }, 200);
+
+        } catch (error) {
+            console.error('Ошибка при загрузке категорий сервера:', error);
         }
     }
 
