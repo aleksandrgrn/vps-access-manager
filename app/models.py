@@ -119,6 +119,7 @@ class SSHKey(db.Model):
     private_key_encrypted = db.Column(db.LargeBinary, nullable=False)
     fingerprint = db.Column(db.String(100), unique=True, nullable=False)
     key_type = db.Column(db.String(20), nullable=False)
+    description = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
 

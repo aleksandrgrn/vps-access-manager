@@ -120,6 +120,7 @@ def generate_key() -> Any:
                 private_key_encrypted=encrypted_private_key,
                 fingerprint=fingerprint,
                 key_type=form.key_type.data,
+                description=form.description.data,
                 user_id=current_user.id,
             )
             db.session.add(new_key)
@@ -210,6 +211,7 @@ def upload_key() -> Any:
                 private_key_encrypted=empty_encrypted,
                 fingerprint=fingerprint,
                 key_type=key_type,
+                description=form.description.data,
                 user_id=current_user.id,
             )
             db.session.add(new_key)
@@ -663,5 +665,42 @@ def bulk_deploy_key() -> Tuple[Dict[str, Any], int]:
 
     except Exception as e:
         logger.error(f"[BULK_DEPLOY_ERROR] {str(e)}")
+        db.session.rollback()
+        return jsonify({"success": False, "message": f"Ошибка: {str(e)}"}), 500
+
+
+@bp.route("/keys/update-description/<int:key_id>", methods=["POST"])
+@login_required
+def update_key_description(key_id: int) -> Tuple[Dict[str, Any], int]:
+    """Обновить описание SSH ключа."""
+    try:
+        key = SSHKey.query.get_or_404(key_id)
+
+        # Проверка прав доступа
+        if key.user_id != current_user.id:
+            return jsonify({"success": False, "message": "Нет доступа"}), 403
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "message": "Данные не предоставлены"}), 400
+
+        description = data.get("description", "").strip()
+        if len(description) > 500:
+            return (
+                jsonify(
+                    {"success": False, "message": "Описание слишком длинное (макс. 500 символов)"}
+                ),
+                400,
+            )
+
+        key.description = description if description else None
+        db.session.commit()
+
+        add_log("update_key_description", target=key.name, details={"key_id": key_id})
+
+        return jsonify({"success": True, "message": "Описание обновлено"}), 200
+
+    except Exception as e:
+        logger.error(f"Ошибка обновления описания ключа: {str(e)}")
         db.session.rollback()
         return jsonify({"success": False, "message": f"Ошибка: {str(e)}"}), 500

@@ -14,7 +14,7 @@ from wtforms import (
     SubmitField,
     TextAreaField,
 )
-from wtforms.validators import DataRequired, NumberRange
+from wtforms.validators import DataRequired, Length, NumberRange
 
 
 class ServerForm(FlaskForm):
@@ -39,6 +39,7 @@ class GenerateKeyForm(FlaskForm):
         choices=[("rsa", "RSA 4096"), ("ed25519", "Ed25519")],
         validators=[DataRequired()],
     )
+    description = TextAreaField("Описание (опционально)", validators=[Length(max=500)])
     submit = SubmitField("Сгенерировать")
 
 
@@ -47,6 +48,7 @@ class UploadKeyForm(FlaskForm):
 
     name = StringField("Название ключа", validators=[DataRequired()])
     public_key = TextAreaField("Публичный ключ", validators=[DataRequired()])
+    description = TextAreaField("Описание (опционально)", validators=[Length(max=500)])
     submit = SubmitField("Загрузить")
 
 
