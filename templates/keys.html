@@ -30,7 +30,19 @@
             </tr>
           </thead>
           <tbody>
+            {# Разделяем ключи на пользовательские и служебные #}
+            {% set user_keys = [] %}
+            {% set root_keys = [] %}
             {% for key in keys %}
+            {% if '_' in key.name %}
+            {% set _ = root_keys.append(key) %}
+            {% else %}
+            {% set _ = user_keys.append(key) %}
+            {% endif %}
+            {% endfor %}
+
+            {# Обычные ключи #}
+            {% for key in user_keys %}
             <tr id="key-{{ key.id }}">
               <td>
                 {{ key.name }}
@@ -45,29 +57,30 @@
                 {% endif %}
               </td>
               <td><span class="badge bg-info text-dark">{{ key.key_type.upper() }}</span></td>
-              <td><code>{{ key.fingerprint }}</code><br><textarea class="form-control form-control-sm mt-1" rows="2"
-                  readonly>{{ key.public_key }}</textarea></td>
+              <td>
+                <code>{{ key.fingerprint }}</code><br>
+                <textarea class="form-control form-control-sm mt-1" rows="2" readonly>{{ key.public_key }}</textarea>
+              </td>
               <td>{{ key.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
               <td class="text-end">
                 <button class="btn btn-sm btn-outline-secondary me-1 view-key-btn" data-key-id="{{ key.id }}"
-                  data-key-name="{{ key.name }}" title="Просмотреть приватный ключ">
+                  data-key-name="{{ key.name }}" title="Просмотр">
                   <i class="bi bi-eye"></i>
                 </button>
                 <button class="btn btn-sm btn-outline-primary me-1 deploy-btn" data-key-id="{{ key.id }}"
-                  data-key-name="{{ key.name }}" title="Развернуть на один сервер">
+                  data-key-name="{{ key.name }}" title="Развернуть">
                   <i class="bi bi-send"></i>
                 </button>
                 <button class="btn btn-sm btn-outline-success me-1 bulk-deploy-btn" data-key-id="{{ key.id }}"
-                  data-key-name="{{ key.name }}" title="Массовое развертывание">
+                  data-key-name="{{ key.name }}" title="Массовое развёртывание">
                   <i class="bi bi-cloud-upload"></i>
                 </button>
                 <button class="btn btn-sm btn-outline-warning me-1 revoke-all-btn" data-key-id="{{ key.id }}"
-                  data-key-name="{{ key.name }}" title="Отозвать ключ со всех серверов">
+                  data-key-name="{{ key.name }}" title="Отозвать со всех серверов">
                   <i class="bi bi-exclamation-triangle"></i>
                 </button>
                 <button class="btn btn-sm btn-outline-danger delete-key-btn" data-bs-toggle="modal"
-                  data-bs-target="#deleteKeyModal" data-id="{{ key.id }}" title="Удалить ключ"
-                  data-name="{{ key.name }}">
+                  data-bs-target="#deleteKeyModal" data-id="{{ key.id }}" title="Удалить" data-name="{{ key.name }}">
                   <i class="bi bi-trash"></i>
                 </button>
               </td>
@@ -77,6 +90,62 @@
               <td colspan="5" class="text-center py-4">SSH-ключи еще не добавлены.</td>
             </tr>
             {% endfor %}
+
+            {# Разделитель для служебных ключей #}
+            {% if root_keys %}
+            <tr class="table-secondary" style="cursor: pointer;" onclick="toggleRootKeysSection()">
+              <td colspan="5" class="text-center py-2">
+                <i class="bi bi-chevron-right" id="rootKeysIcon"></i>
+                <strong id="rootKeysLabel">Показать служебные ключи ({{ root_keys|length }})</strong>
+              </td>
+            </tr>
+
+            {# Служебные ключи #}
+            {% for key in root_keys %}
+            <tr id="key-{{ key.id }}" class="root-key d-none">
+              <td>
+                {{ key.name }}
+                {% if key.description %}
+                <i class="bi bi-info-circle text-muted ms-1" style="cursor: pointer;" data-bs-toggle="tooltip"
+                  data-bs-placement="top"
+                  title="{{ key.description[:100] }}{{ '...' if key.description|length > 100 else '' }}"
+                  onclick="openDescriptionModal({{ key.id }}, '{{ key.name }}', `{{ key.description|replace('`', '\\`')|replace('\n', ' ') }}`)"></i>
+                {% else %}
+                <i class="bi bi-info-circle text-muted ms-1 opacity-25" style="cursor: pointer;"
+                  onclick="openDescriptionModal({{ key.id }}, '{{ key.name }}', '')"></i>
+                {% endif %}
+              </td>
+              <td><span class="badge bg-info text-dark">{{ key.key_type.upper() }}</span></td>
+              <td>
+                <code>{{ key.fingerprint }}</code><br>
+                <textarea class="form-control form-control-sm mt-1" rows="2" readonly>{{ key.public_key }}</textarea>
+              </td>
+              <td>{{ key.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-outline-secondary me-1 view-key-btn" data-key-id="{{ key.id }}"
+                  data-key-name="{{ key.name }}" title="Просмотр">
+                  <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-primary me-1 deploy-btn" data-key-id="{{ key.id }}"
+                  data-key-name="{{ key.name }}" title="Развернуть">
+                  <i class="bi bi-send"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-success me-1 bulk-deploy-btn" data-key-id="{{ key.id }}"
+                  data-key-name="{{ key.name }}" title="Массовое развёртывание">
+                  <i class="bi bi-cloud-upload"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-warning me-1 revoke-all-btn" data-key-id="{{ key.id }}"
+                  data-key-name="{{ key.name }}" title="Отозвать со всех серверов">
+                  <i class="bi bi-exclamation-triangle"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger delete-key-btn" data-bs-toggle="modal"
+                  data-bs-target="#deleteKeyModal" data-id="{{ key.id }}" title="Удалить" data-name="{{ key.name }}">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+            {% endif %}
           </tbody>
         </table>
       </div>
@@ -423,6 +492,33 @@
 
 {% block scripts %}
 <script>
+  let rootKeysExpanded = false;
+
+  function toggleRootKeysSection() {
+    const rootKeys = document.querySelectorAll('.root-key');
+    const icon = document.getElementById('rootKeysIcon');
+    const label = document.getElementById('rootKeysLabel');
+    const count = rootKeys.length;
+
+    rootKeysExpanded = !rootKeysExpanded;
+
+    rootKeys.forEach(row => {
+      if (rootKeysExpanded) {
+        row.classList.remove('d-none');
+      } else {
+        row.classList.add('d-none');
+      }
+    });
+
+    if (rootKeysExpanded) {
+      icon.className = 'bi bi-chevron-down';
+      label.textContent = `Скрыть служебные ключи (${count})`;
+    } else {
+      icon.className = 'bi bi-chevron-right';
+      label.textContent = `Показать служебные ключи (${count})`;
+    }
+  }
+
   let currentEditKeyId = null;
 
   // Инициализация тултипов Bootstrap

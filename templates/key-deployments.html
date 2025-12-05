@@ -155,39 +155,105 @@
                             <th>Действия</th>
                         </tr>
                     </thead>
-                    <tbody id="deploymentsTable">
-                        {% for deployment in deployments %}
+                    <tbody>
+                        {# Разделяем развертывания по имени ключа #}
+                        {% set user_deployments = [] %}
+                        {% set root_deployments = [] %}
+                        {% for d in deployments %}
+                        {% if '_' in d.ssh_key.name %}
+                        {% set _ = root_deployments.append(d) %}
+                        {% else %}
+                        {% set _ = user_deployments.append(d) %}
+                        {% endif %}
+                        {% endfor %}
+
+                        {# Если вообще нет развертываний #}
+                        {% if not deployments %}
                         <tr>
-                            <td>{{ deployment.ssh_key.name|escape }}</td>
-                            <td><span class="badge bg-info text-dark">{{ deployment.ssh_key.key_type|upper }}</span>
+                            <td colspan="7" class="text-center py-4">Развернутые ключи отсутствуют.</td>
+                        </tr>
+                        {% endif %}
+
+                        {# Обычные развертывания #}
+                        {% for deployment in user_deployments %}
+                        <tr>
+                            <td>{{ deployment.ssh_key.name }}</td>
+                            <td><span class="badge bg-info text-dark">{{ deployment.ssh_key.key_type.upper() }}</span>
                             </td>
-                            <td>{{ deployment.server.name|escape }}</td>
-                            <td>{{ deployment.server.ip_address|escape }}</td>
+                            <td>{{ deployment.server.name }}</td>
+                            <td>{{ deployment.server.ip_address }}</td>
                             <td>{{ deployment.deployed_at.strftime('%Y-%m-%d %H:%M:%S') if deployment.deployed_at else
                                 'N/A' }}</td>
                             <td>
                                 {% if deployment.revoked_at %}
-                                <span class="badge bg-danger">Отозван</span>
+                                <span class="badge bg-secondary">Отозван</span>
                                 {% else %}
                                 <span class="badge bg-success">Активен</span>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td class="text-end">
                                 {% if not deployment.revoked_at %}
-                                <button class="btn btn-sm btn-danger"
-                                    onclick="openRevokeModal('{{ deployment.id }}', '{{ deployment.ssh_key.name }}', '{{ deployment.server.name }}')">
-                                    <i class="bi bi-trash"></i> Отозвать
+                                <button class="btn btn-sm btn-danger revoke-btn"
+                                    data-deployment-id="{{ deployment.id }}"
+                                    data-key-name="{{ deployment.ssh_key.name }}"
+                                    data-server-name="{{ deployment.server.name }}" title="Отозвать доступ">
+                                    <i class="bi bi-trash me-1"></i>Отозвать
                                 </button>
                                 {% else %}
-                                <span class="text-muted">Отозван</span>
+                                <span class="text-muted small">Отозван</span>
                                 {% endif %}
                             </td>
                         </tr>
                         {% else %}
+                        {# Показываем сообщение, если нет ПОЛЬЗОВАТЕЛЬСКИХ ключей #}
                         <tr>
-                            <td colspan="7" class="text-center py-4">Нет развёрнутых ключей.</td>
+                            <td colspan="7" class="text-center py-4">Развернутые ключи отсутствуют.</td>
                         </tr>
                         {% endfor %}
+
+                        {# Разделитель для служебных развертываний #}
+                        {% if root_deployments %}
+                        <tr class="table-secondary" style="cursor: pointer;" onclick="toggleRootDeploymentsSection()">
+                            <td colspan="7" class="text-center py-2">
+                                <i class="bi bi-chevron-right" id="rootDeploymentsIcon"></i>
+                                <strong id="rootDeploymentsLabel">
+                                    Показать развертывания служебных ключей ({{ root_deployments|length }})
+                                </strong>
+                            </td>
+                        </tr>
+
+                        {# Служебные развертывания (скрыты по умолчанию) #}
+                        {% for deployment in root_deployments %}
+                        <tr class="root-deployment d-none">
+                            <td>{{ deployment.ssh_key.name }}</td>
+                            <td><span class="badge bg-info text-dark">{{ deployment.ssh_key.key_type.upper() }}</span>
+                            </td>
+                            <td>{{ deployment.server.name }}</td>
+                            <td>{{ deployment.server.ip_address }}</td>
+                            <td>{{ deployment.deployed_at.strftime('%Y-%m-%d %H:%M:%S') if deployment.deployed_at else
+                                'N/A' }}</td>
+                            <td>
+                                {% if deployment.revoked_at %}
+                                <span class="badge bg-secondary">Отозван</span>
+                                {% else %}
+                                <span class="badge bg-success">Активен</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if not deployment.revoked_at %}
+                                <button class="btn btn-sm btn-danger revoke-btn"
+                                    data-deployment-id="{{ deployment.id }}"
+                                    data-key-name="{{ deployment.ssh_key.name }}"
+                                    data-server-name="{{ deployment.server.name }}" title="Отозвать доступ">
+                                    <i class="bi bi-trash me-1"></i>Отозвать
+                                </button>
+                                {% else %}
+                                <span class="text-muted small">Отозван</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% endif %}
                     </tbody>
                 </table>
             </div>
@@ -229,353 +295,131 @@
 
 {% block scripts %}
 <script>
+    // --- Управление видимостью служебных ключей ---
+    let rootDeploymentsExpanded = false;
+
+    function toggleRootDeploymentsSection() {
+        const rows = document.querySelectorAll('.root-deployment');
+        const icon = document.getElementById('rootDeploymentsIcon');
+        const label = document.getElementById('rootDeploymentsLabel');
+        const count = rows.length;
+
+        rootDeploymentsExpanded = !rootDeploymentsExpanded;
+
+        rows.forEach(row => {
+            if (rootDeploymentsExpanded) {
+                row.classList.remove('d-none');
+            } else {
+                row.classList.add('d-none');
+            }
+        });
+
+        if (icon && label) {
+            if (rootDeploymentsExpanded) {
+                icon.className = 'bi bi-chevron-down';
+                label.textContent = `Скрыть развертывания служебных ключей (${count})`;
+            } else {
+                icon.className = 'bi bi-chevron-right';
+                label.textContent = `Показать развертывания служебных ключей (${count})`;
+            }
+        }
+    }
+
+    // --- Логика отзыва ключей ---
     let currentDeploymentId = null;
+    let revokeModal = null;
 
-    /**
-     * Открывает модальное окно подтверждения отзыва ключа.
-     * @param {string} deploymentId - ID развертывания ключа
-     * @param {string} keyName - Название ключа
-     * @param {string} serverName - Название сервера
-     */
-    function openRevokeModal(deploymentId, keyName, serverName) {
-        // Сохраняем ID для последующего удаления
-        currentDeploymentId = deploymentId;
-
-        // Заполняем данные в модалке
-        document.getElementById('revokeKeyName').textContent = keyName;
-        document.getElementById('revokeServerName').textContent = serverName;
-
-        // Скрываем результат и показываем кнопку "Отозвать"
-        document.getElementById('revokeResult').classList.add('d-none');
-        document.getElementById('confirmRevokeBtn').classList.remove('d-none');
-
-        // Открываем модалку
-        const modal = new bootstrap.Modal(document.getElementById('singleRevokeModal'));
-        modal.show();
-    }
-
-    /**
-     * Подтверждает и выполняет отзыв ключа.
-     */
-    function confirmRevoke() {
-        const resultDiv = document.getElementById('revokeResult');
-        const confirmBtn = document.getElementById('confirmRevokeBtn');
-        const cancelBtn = document.getElementById('singleRevokeCloseBtn');
-        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-
-        // Показываем индикатор загрузки
-        confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Отзыв...';
-
-        // Таймаут на fetch запрос: 30 секунд
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-        fetch('/api/key-deployments/revoke', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrfToken
-            },
-            body: JSON.stringify({
-                deployment_id: currentDeploymentId
-            }),
-            signal: controller.signal
-        })
-            .then(response => {
-                clearTimeout(timeoutId);
-                if (response.status === 500) {
-                    return response.json();
-                }
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    // ✅ УСПЕХ - показываем зеленый alert внутри модалки
-                    resultDiv.className = 'alert alert-success mt-3';
-                    const serverInfo = data.server_name && data.server_ip
-                        ? ` с сервера: ${data.server_name} (${data.server_ip})`
-                        : '';
-                    resultDiv.innerHTML = `✅ Успешно отозвано${serverInfo}`;
-                    resultDiv.classList.remove('d-none');
-
-                    // Скрываем кнопку "Отозвать"
-                    confirmBtn.classList.add('d-none');
-
-                    // Добавляем перезагрузку страницы при закрытии
-                    cancelBtn.setAttribute('onclick', 'location.reload()');
-
-                    // Модалка остается открытой, юзер закроет сам
-                } else {
-                    // ❌ ОШИБКА - показываем красный alert внутри модалки
-                    resultDiv.className = 'alert alert-danger mt-3';
-                    resultDiv.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${escapeHtml(data.message || 'Ошибка при отзыве ключа')}`;
-                    resultDiv.classList.remove('d-none');
-
-                    // Возвращаем кнопку в исходное состояние
-                    confirmBtn.disabled = false;
-                    confirmBtn.innerHTML = '<i class="bi bi-trash"></i> Отозвать';
-                }
-            })
-            .catch(error => {
-                clearTimeout(timeoutId);
-
-                // Показываем ошибку в модалке
-                resultDiv.className = 'alert alert-danger mt-3';
-                if (error.name === 'AbortError') {
-                    resultDiv.innerHTML = '<i class="bi bi-exclamation-triangle"></i> ❌ Таймаут при отзыве ключа (превышено 30 секунд)';
-                } else {
-                    resultDiv.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ❌ Ошибка: ${escapeHtml(error.message || error)}`;
-                }
-                resultDiv.classList.remove('d-none');
-
-                // Возвращаем кнопку в исходное состояние
-                confirmBtn.disabled = false;
-                confirmBtn.innerHTML = '<i class="bi bi-trash"></i> Отозвать';
-
-                console.error('Ошибка при отзыве ключа:', error);
-            });
-    }
-
-    /**
-     * Показывает модальное окно с детальной диагностикой ошибки (ЯКОРЬ #3)
-     * @param {Object} data - Данные ошибки от сервера
-     */
-    function showRevokeError(data) {
-        const modal = new bootstrap.Modal(document.getElementById('revokeErrorModal'));
-
-        // Заполнить основное сообщение об ошибке
-        document.getElementById('errorMessage').innerHTML = `
-        <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(data.message || 'Неизвестная ошибка')}
-        <br><small class="text-danger">⚠️ ВНИМАНИЕ: Ключ НЕ был удалён с VPS!</small>
-    `;
-
-        // Заполнить описание проблемы
-        const problemText = data.details || data.message || 'Не удалось выполнить SSH операцию';
-        document.getElementById('problemDiv').innerHTML = '<p>' + escapeHtml(problemText) + '</p>';
-
-        // Заполнить список причин (на основе error_type)
-        const reasonsList = document.getElementById('reasonsList');
-        const errorType = data.error_type || 'unknown';
-        let reasons = [];
-
-        switch (errorType) {
-            case 'decryption_error':
-                reasons = [
-                    'ENCRYPTION_KEY не установлен или неверный',
-                    'Повреждённые данные в БД',
-                    'Ключ доступа (access_key) не найден'
-                ];
-                break;
-            case 'ssh_error':
-            case 'ssh_exception':
-                reasons = [
-                    'Сервер недоступен или выключен',
-                    'SSH порт закрыт файрволом',
-                    'Неверные SSH параметры (порт, username)',
-                    'Проблемы с сетью'
-                ];
-                break;
-            case 'missing_access_key':
-                reasons = [
-                    'Для сервера не настроен root ключ доступа',
-                    'Сервер был добавлен без ключа'
-                ];
-                break;
-            default:
-                reasons = ['Проверьте логи сервера для деталей'];
-        }
-
-        reasonsList.innerHTML = reasons.map(r => '<li>' + escapeHtml(r) + '</li>').join('');
-
-        // Заполнить рекомендации
-        let solution = 'Проверьте доступность сервера и попробуйте снова';
-        if (errorType === 'decryption_error') {
-            solution = 'Проверьте переменную окружения ENCRYPTION_KEY на сервере';
-        } else if (errorType === 'ssh_error' || errorType === 'ssh_exception') {
-            solution = 'Проверьте что сервер доступен: ping, SSH порт открыт, правильные учётные данные';
-        } else if (errorType === 'missing_access_key') {
-            solution = 'Пересоздайте сервер с правильным root ключом доступа';
-        }
-        document.getElementById('solutionDiv').innerHTML = '<p>' + escapeHtml(solution) + '</p>';
-
-        // Заполнить информацию о сервере
-        if (data.server && data.ip) {
-            document.getElementById('serverInfoDiv').innerHTML = `
-            <div class="mb-2"><strong>Сервер:</strong> ${escapeHtml(data.server)}</div>
-            <div class="mb-2"><code>Адрес: ${escapeHtml(data.ip)}</code></div>
-            <div><code>Тип ошибки: ${escapeHtml(errorType)}</code></div>
-        `;
-        } else if (data.server_info) {
-            const info = data.server_info;
-            document.getElementById('serverInfoDiv').innerHTML = `
-            <div class="mb-2"><strong>Сервер:</strong> ${escapeHtml(info.name)}</div>
-            <div class="mb-2"><code>Адрес: ${escapeHtml(info.ip)}:${info.port}</code></div>
-            <div><code>Пользователь: ${escapeHtml(info.username)}</code></div>
-            <div><code>Тип ошибки: ${escapeHtml(errorType)}</code></div>
-        `;
-        } else {
-            document.getElementById('serverInfoDiv').innerHTML = `<code>Тип ошибки: ${escapeHtml(errorType)}</code>`;
-        }
-
-        modal.show();
-    }
-
-    /**
-     * Показывает модальное окно успеха (зелёное) (ЯКОРЬ #3)
-     * @param {Object} data - Данные успеха от сервера
-     */
-    function showRevokeSuccess(data) {
-        const modal = new bootstrap.Modal(document.getElementById('revokeSuccessModal'));
-
-        // Заполнить сообщение
-        document.getElementById('successMessage').textContent = data.message || '✅ Ключ успешно отозван';
-
-        // Заполнить детали
-        const details = [];
-        if (data.server) {
-            details.push(`Сервер: ${data.server}`);
-        }
-        if (data.ip) {
-            details.push(`IP: ${data.ip}`);
-        }
-        document.getElementById('successDetails').textContent = details.join(' | ');
-
-        modal.show();
-    }
-
-    /**
-     * Экранирует HTML символы для безопасного вывода
-     * @param {string} text - Текст для экранирования
-     * @returns {string} Экранированный текст
-     */
-    function escapeHtml(text) {
-        const map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
-        };
-        return text.replace(/[&<>"']/g, m => map[m]);
-    }
-
-    // Инициализация обработчика кнопки "Попробовать снова"
     document.addEventListener('DOMContentLoaded', function () {
-        const retryBtn = document.getElementById('retryRevokeBtn');
-        if (retryBtn) {
-            retryBtn.addEventListener('click', function () {
-                const modal = bootstrap.Modal.getInstance(document.getElementById('revokeErrorModal'));
-                if (modal) {
-                    modal.hide();
-                }
+        // 1. Инициализация модалки (используем правильный ID из твоего HTML - singleRevokeModal)
+        const modalEl = document.getElementById('singleRevokeModal');
+        if (modalEl) {
+            revokeModal = new bootstrap.Modal(modalEl);
+        }
 
-                // Небольшая задержка перед повторной попыткой
-                setTimeout(() => revokeKey(currentDeploymentId), 500);
+        // 2. Делегирование событий для кнопок отзыва (работает для скрытых/динамических элементов)
+        document.body.addEventListener('click', function (e) {
+            // Ищем клик по кнопке с классом .revoke-btn
+            const btn = e.target.closest('.revoke-btn');
+            if (btn) {
+                e.preventDefault();
+                const deploymentId = btn.getAttribute('data-deployment-id');
+                const keyName = btn.getAttribute('data-key-name');
+                const serverName = btn.getAttribute('data-server-name');
+
+                // Вызываем открытие модалки
+                openRevokeModal(deploymentId, keyName, serverName);
+            }
+        });
+
+        // 3. Обработчик кнопки подтверждения в модалке
+        const confirmBtn = document.getElementById('confirmRevokeBtn');
+        if (confirmBtn) {
+            confirmBtn.addEventListener('click', function () {
+                if (currentDeploymentId) {
+                    revokeKey(currentDeploymentId);
+                }
             });
         }
     });
 
-    /**
-     * Отзывает SSH ключ со ВСЕХ серверов одновременно.
-     * @param {number} keyId - ID SSH ключа
-     */
-    function revokeKeyFromAllServers(keyId) {
-        if (!confirm('⚠️ ВНИМАНИЕ! Вы отозовёте этот ключ СО ВСЕХ серверов одновременно!\n\nЭто действие нельзя будет отменить. Продолжить?')) {
-            return;
+    // Функция открытия модалки
+    function openRevokeModal(deploymentId, keyName, serverName) {
+        currentDeploymentId = deploymentId;
+
+        // Обновляем тексты в модалке (проверь ID элементов в HTML!)
+        const keyNameEl = document.getElementById('revokeKeyName');
+        const serverNameEl = document.getElementById('revokeServerName');
+
+        if (keyNameEl) keyNameEl.textContent = keyName;
+        if (serverNameEl) serverNameEl.textContent = serverName;
+
+        if (revokeModal) {
+            revokeModal.show();
+        } else {
+            console.error('Revoke modal not initialized');
         }
-
-        if (!confirm('Последний шанс! Отозвать ключ со ВСЕХ серверов?')) {
-            return;
-        }
-
-        const progressDiv = document.createElement('div');
-        progressDiv.className = 'alert alert-warning position-fixed top-0 start-50 translate-middle-x p-3 m-3';
-        progressDiv.style.zIndex = '1050';
-        progressDiv.innerHTML = '<i class="bi bi-hourglass-split"></i> Отзыв ключа со всех серверов... Пожалуйста ждите...';
-        document.body.appendChild(progressDiv);
-
-        // Таймаут на fetch запрос: 5 минут (для массовых операций)
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 300000);
-
-        fetch('/api/key-deployments/revoke', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
-            },
-            body: JSON.stringify({
-                key_id: keyId,
-                server_id: null
-            }),
-            signal: controller.signal
-        })
-            .then(response => {
-                clearTimeout(timeoutId);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                progressDiv.remove();
-
-                if (data.success) {
-                    const successCount = data.revoked || 0;
-                    const totalCount = data.total || 0;
-
-                    let message = `✅ Операция завершена!\n\n`;
-                    message += `Успешно отозвано: ${successCount}/${totalCount}\n`;
-
-                    if (data.failed && data.failed.length > 0) {
-                        message += `\n⚠️ Ошибки на серверах:\n`;
-                        data.failed.forEach(failure => {
-                            // Экранируем вывод для безопасности
-                            const serverId = String(failure.server_id || 'unknown').replace(/[<>]/g, '');
-                            const errorMsg = String(failure.error || 'unknown').replace(/[<>]/g, '');
-                            message += `- Сервер ID ${serverId}: ${errorMsg}\n`;
-                        });
-                    }
-
-                    alert(message);
-                    location.reload();
-                } else {
-                    alert('Критическая ошибка: ' + (data.message || 'Неизвестная ошибка'));
-                }
-            })
-            .catch(error => {
-                clearTimeout(timeoutId);
-                progressDiv.remove();
-                if (error.name === 'AbortError') {
-                    alert('Ошибка: Таймаут при отзыве ключа (превышено 5 минут)');
-                } else {
-                    alert('Ошибка отзыва ключа: ' + (error.message || error));
-                }
-                console.error('Ошибка при отзыве ключа:', error);
-            });
     }
 
-    /**
-     * Применяет фильтры к таблице развертываний.
-     */
-    function applyFilters() {
-        const keyFilter = document.getElementById('keyFilter').value;
-        const serverFilter = document.getElementById('serverFilter').value;
-        const statusFilter = document.getElementById('statusFilter').value;
+    // Функция отправки запроса на отзыв
+    async function revokeKey(deploymentId) {
+        const btn = document.getElementById('confirmRevokeBtn');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
 
-        // Построение URL с параметрами фильтра
-        const params = new URLSearchParams();
-        if (keyFilter) params.append('key_id', keyFilter);
-        if (serverFilter) params.append('server_id', serverFilter);
-        if (statusFilter) params.append('status', statusFilter);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Отзыв...';
+        }
 
-        // Перенаправление с параметрами
-        const queryString = params.toString();
-        window.location.href = queryString ? `?${queryString}` : window.location.pathname;
+        try {
+            const response = await fetch('/api/key-deployments/revoke', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                },
+                body: JSON.stringify({ deployment_id: deploymentId })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                if (revokeModal) revokeModal.hide();
+                location.reload(); // Перезагрузка для обновления статуса
+            } else {
+                alert('Ошибка: ' + data.message);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = 'Отозвать ключ';
+                }
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Произошла ошибка при отзыве ключа');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = 'Отозвать ключ';
+            }
+        }
     }
 </script>
 {% endblock %}
