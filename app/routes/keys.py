@@ -4,12 +4,22 @@ Keys Routes
 Маршруты для управления SSH ключами с type hints и обработкой ошибок.
 """
 
+import io
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from app import db
@@ -704,3 +714,49 @@ def update_key_description(key_id: int) -> Tuple[Dict[str, Any], int]:
         logger.error(f"Ошибка обновления описания ключа: {str(e)}")
         db.session.rollback()
         return jsonify({"success": False, "message": f"Ошибка: {str(e)}"}), 500
+
+
+@bp.route("/keys/download/<int:key_id>", methods=["GET"])
+@login_required
+def download_key(key_id: int):
+    """Скачать приватный ключ как файл"""
+    # Получаем ключ
+    key = SSHKey.query.get_or_404(key_id)
+
+    # Проверка прав
+    if key.user_id != current_user.id:
+        flash("Нет доступа к этому ключу", "error")
+        return redirect(url_for("keys.index"))
+
+    try:
+        # Расшифровываем через существующую функцию (как в view_key)
+        decrypt_result = decrypt_access_key(key)
+
+        if not decrypt_result["success"]:
+            logger.error(f"[DOWNLOAD_KEY] Decrypt failed: {decrypt_result['message']}")
+            flash(f"Ошибка расшифровки ключа: {decrypt_result['message']}", "error")
+            return redirect(url_for("keys.index"))
+
+        private_key = decrypt_result["private_key"]
+
+        # Создаем файл в памяти
+        mem = io.BytesIO()
+        mem.write(private_key.encode("utf-8"))
+        mem.seek(0)
+
+        # Формируем имя файла
+        safe_name = "".join([c for c in key.name if c.isalnum() or c in ("-", "_")]).strip()
+        if not safe_name:
+            safe_name = f"key_{key_id}"
+        filename = f"{safe_name}.pem"
+
+        add_log("download_key", target=key.name, details={"key_id": key_id})
+
+        return send_file(
+            mem, as_attachment=True, download_name=filename, mimetype="application/x-pem-file"
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании ключа {key_id}: {str(e)}")
+        flash(f"Ошибка при скачивании ключа: {str(e)}", "error")
+        return redirect(url_for("keys.index"))

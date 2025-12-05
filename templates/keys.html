@@ -460,6 +460,9 @@
         <button type="button" class="btn btn-primary" id="copyPrivateKeyBtn">
           <i class="bi bi-clipboard me-2"></i>Скопировать
         </button>
+        <a id="downloadKeyBtn" href="#" class="btn btn-success me-2">
+          <i class="bi bi-download me-2"></i>Скачать .pem
+        </a>
       </div>
     </div>
   </div>
@@ -638,6 +641,11 @@
     try {
       // Показываем состояние загрузки
       document.getElementById('viewKeyName').textContent = keyName;
+      // Обновляем ссылку на скачивание
+      const downloadBtn = document.getElementById('downloadKeyBtn');
+      if (downloadBtn) {
+        downloadBtn.href = `/api/keys/download/${keyId}`;
+      }
       document.getElementById('privateKeyContent').value = 'Загрузка...';
 
       if (viewKeyModal) {
