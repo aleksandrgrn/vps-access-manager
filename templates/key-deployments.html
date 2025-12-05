@@ -167,13 +167,6 @@
                         {% endif %}
                         {% endfor %}
 
-                        {# Если вообще нет развертываний #}
-                        {% if not deployments %}
-                        <tr>
-                            <td colspan="7" class="text-center py-4">Развернутые ключи отсутствуют.</td>
-                        </tr>
-                        {% endif %}
-
                         {# Обычные развертывания #}
                         {% for deployment in user_deployments %}
                         <tr>
@@ -203,6 +196,10 @@
                                 <span class="text-muted small">Отозван</span>
                                 {% endif %}
                             </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center py-4">Развернутые ключи отсутствуют.</td>
                         </tr>
                         {% endfor %}
 
