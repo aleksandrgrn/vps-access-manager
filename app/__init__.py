@@ -5,6 +5,7 @@ VPS Manager Application Factory
 """
 
 import os
+from datetime import timedelta
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -67,7 +68,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
         SESSION_COOKIE_SAMESITE="Lax",
-        PERMANENT_SESSION_LIFETIME=3600,  # 1 час
+        PERMANENT_SESSION_LIFETIME=timedelta(days=7),  # 7 дней
         SESSION_REFRESH_EACH_REQUEST=True,
         WTF_CSRF_TIME_LIMIT=3600,
         WTF_CSRF_CHECK_DEFAULT=True,

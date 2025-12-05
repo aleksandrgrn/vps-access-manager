@@ -6,7 +6,7 @@ Authentication Routes
 
 from typing import Any
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db
@@ -43,7 +43,8 @@ def login() -> Any:
             user = User.query.filter_by(username=form.username.data).first()
 
             if user and user.check_password(form.password.data):
-                login_user(user)
+                session.permanent = True  # Сессия будет жить 7 дней
+                login_user(user, remember=True)
                 add_log("login_success", target=user.username)
 
                 # Перенаправление на следующую страницу, если она была указана
