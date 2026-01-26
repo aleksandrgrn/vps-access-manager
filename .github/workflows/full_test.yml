@@ -53,8 +53,8 @@ jobs:
     - name: Run Bandit Security Check
       run: bandit -r app/ -ll
 
-    - name: Run Safety Check
-      run: safety scan
+    - name: Run pip-audit
+      run: pip-audit -r requirements.txt
 
     - name: Run Unit & Integration Tests
       run: |
