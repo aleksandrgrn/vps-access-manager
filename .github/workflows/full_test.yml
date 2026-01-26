@@ -54,7 +54,7 @@ jobs:
       run: bandit -r app/ -ll
 
     - name: Run Safety Check
-      run: safety check
+      run: safety scan
 
     - name: Run Unit & Integration Tests
       run: |
