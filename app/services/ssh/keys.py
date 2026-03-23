@@ -26,8 +26,9 @@ def get_secure_temp_dir() -> str:
 
         return configured_temp_dir
 
-    if os.path.isdir("/dev/shm") and os.access("/dev/shm", os.W_OK):
-        return "/dev/shm"
+    shm_path = "/dev/shm"  # nosec B108 - intentional tmpfs location for short-lived secret files
+    if os.path.isdir(shm_path) and os.access(shm_path, os.W_OK):
+        return shm_path
 
     raise RuntimeError("Безопасная временная директория недоступна на сервере")
 
