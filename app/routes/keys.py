@@ -34,6 +34,23 @@ bp = Blueprint("keys", __name__)
 logger = logging.getLogger(__name__)
 
 
+def _build_safe_key_filename(key: SSHKey, key_id: int, extension: str) -> str:
+    """Формирует безопасное имя файла для скачивания ключа."""
+    safe_name = "".join([c for c in key.name if c.isalnum() or c in ("-", "_")]).strip()
+    if not safe_name:
+        safe_name = f"key_{key_id}"
+    return f"{safe_name}.{extension}"
+
+
+def _send_private_file(mem: io.BytesIO, filename: str, mimetype: str):
+    """Отдает приватный файл с защитой от кеширования."""
+    response = send_file(mem, as_attachment=True, download_name=filename, mimetype=mimetype)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
+
 @bp.route("/keys")
 @login_required
 def keys() -> str:
@@ -726,7 +743,7 @@ def download_key(key_id: int):
     # Проверка прав
     if key.user_id != current_user.id:
         flash("Нет доступа к этому ключу", "error")
-        return redirect(url_for("keys.index"))
+        return redirect(url_for("keys.keys"))
 
     try:
         # Расшифровываем через существующую функцию (как в view_key)
@@ -735,7 +752,7 @@ def download_key(key_id: int):
         if not decrypt_result["success"]:
             logger.error(f"[DOWNLOAD_KEY] Decrypt failed: {decrypt_result['message']}")
             flash(f"Ошибка расшифровки ключа: {decrypt_result['message']}", "error")
-            return redirect(url_for("keys.index"))
+            return redirect(url_for("keys.keys"))
 
         private_key = decrypt_result["private_key"]
 
@@ -744,19 +761,70 @@ def download_key(key_id: int):
         mem.write(private_key.encode("utf-8"))
         mem.seek(0)
 
-        # Формируем имя файла
-        safe_name = "".join([c for c in key.name if c.isalnum() or c in ("-", "_")]).strip()
-        if not safe_name:
-            safe_name = f"key_{key_id}"
-        filename = f"{safe_name}.pem"
+        filename = _build_safe_key_filename(key, key_id, "pem")
 
         add_log("download_key", target=key.name, details={"key_id": key_id})
 
-        return send_file(
-            mem, as_attachment=True, download_name=filename, mimetype="application/x-pem-file"
-        )
+        return _send_private_file(mem, filename, "application/x-pem-file")
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании ключа {key_id}: {str(e)}")
         flash(f"Ошибка при скачивании ключа: {str(e)}", "error")
-        return redirect(url_for("keys.index"))
+        return redirect(url_for("keys.keys"))
+
+
+@bp.route("/keys/download/<int:key_id>/ppk", methods=["GET"])
+@login_required
+def download_key_ppk(key_id: int):
+    """Скачать приватный ключ как PuTTY PPK файл."""
+    key = SSHKey.query.get_or_404(key_id)
+
+    if key.user_id != current_user.id:
+        flash("Нет доступа к этому ключу", "error")
+        return redirect(url_for("keys.keys"))
+
+    try:
+        if not key.private_key_encrypted:
+            flash(
+                "Для этого ключа недоступна выгрузка .ppk, так как приватная часть не хранится",
+                "error",
+            )
+            return redirect(url_for("keys.keys"))
+
+        decrypt_result = decrypt_access_key(key)
+
+        if not decrypt_result["success"]:
+            logger.error(f"[DOWNLOAD_KEY_PPK] Decrypt failed: {decrypt_result['message']}")
+            if decrypt_result.get("error_type") in {"missing_private_key", "invalid_decrypted_key"}:
+                flash(
+                    "Для этого ключа недоступна выгрузка .ppk, так как приватная часть не хранится",
+                    "error",
+                )
+            else:
+                flash("Ошибка расшифровки ключа", "error")
+            return redirect(url_for("keys.keys"))
+
+        private_key = decrypt_result["private_key"]
+        if not private_key or not private_key.strip():
+            flash(
+                "Для этого ключа недоступна выгрузка .ppk, так как приватная часть не хранится",
+                "error",
+            )
+            return redirect(url_for("keys.keys"))
+
+        ppk_content = ssh_keys.convert_private_key_to_ppk(private_key)
+
+        mem = io.BytesIO()
+        mem.write(ppk_content)
+        mem.seek(0)
+
+        filename = _build_safe_key_filename(key, key_id, "ppk")
+
+        add_log("download_key_ppk", target=key.name, details={"key_id": key_id, "format": "ppk"})
+
+        return _send_private_file(mem, filename, "application/octet-stream")
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании PPK ключа {key_id}: {str(e)}")
+        flash("Ошибка при скачивании .ppk", "error")
+        return redirect(url_for("keys.keys"))

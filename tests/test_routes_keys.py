@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -73,6 +73,110 @@ def test_delete_key(auth_client, new_ssh_key):
     response = auth_client.post(f"/api/keys/delete/{new_ssh_key.id}", follow_redirects=True)
     assert response.status_code == 200
     assert SSHKey.query.get(new_ssh_key.id) is None
+
+
+def test_download_key_pem_success(auth_client, new_ssh_key):
+    """Test successful PEM private key download."""
+    private_key = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        + "A" * 128
+        + "\n-----END OPENSSH PRIVATE KEY-----\n"
+    )
+
+    with patch("app.routes.keys.decrypt_access_key") as mock_decrypt:
+        mock_decrypt.return_value = {"success": True, "private_key": private_key}
+
+        response = auth_client.get(f"/api/keys/download/{new_ssh_key.id}")
+
+    assert response.status_code == 200
+    assert response.data == private_key.encode("utf-8")
+    assert "TestKey.pem" in response.headers["Content-Disposition"]
+    assert response.mimetype == "application/x-pem-file"
+    assert response.headers["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
+
+
+def test_download_key_ppk_success(auth_client, new_ssh_key):
+    """Test successful PPK private key download."""
+    private_key = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        + "B" * 128
+        + "\n-----END OPENSSH PRIVATE KEY-----\n"
+    )
+    ppk_content = b"PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\n"
+
+    def mock_puttygen(command, capture_output, text, timeout, check):
+        output_path = command[-1]
+        with open(output_path, "wb") as output_file:
+            output_file.write(ppk_content)
+
+        return Mock(returncode=0, stdout="", stderr="")
+
+    with patch("app.routes.keys.decrypt_access_key") as mock_decrypt, patch(
+        "app.services.ssh.keys.get_secure_temp_dir", return_value="/tmp"
+    ), patch(
+        "app.services.ssh.keys.get_puttygen_path", return_value="/usr/bin/puttygen"
+    ), patch(
+        "app.services.ssh.keys.subprocess.run", side_effect=mock_puttygen
+    ):
+        mock_decrypt.return_value = {"success": True, "private_key": private_key}
+
+        response = auth_client.get(f"/api/keys/download/{new_ssh_key.id}/ppk")
+
+    assert response.status_code == 200
+    assert response.data == ppk_content
+    assert "TestKey.ppk" in response.headers["Content-Disposition"]
+    assert response.mimetype == "application/octet-stream"
+    assert response.headers["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
+
+
+def test_download_key_ppk_missing_private_material(auth_client, new_ssh_key):
+    """Test PPK download returns controlled error for public-only keys."""
+    with patch("app.routes.keys.decrypt_access_key") as mock_decrypt, patch(
+        "app.services.ssh.keys.subprocess.run"
+    ) as mock_puttygen:
+        mock_decrypt.return_value = {
+            "success": False,
+            "message": "Расшифрованный ключ невалиден",
+            "error_type": "invalid_decrypted_key",
+        }
+
+        response = auth_client.get(
+            f"/api/keys/download/{new_ssh_key.id}/ppk", follow_redirects=True
+        )
+
+    assert response.status_code == 200
+    assert "Для этого ключа недоступна выгрузка .ppk".encode("utf-8") in response.data
+    mock_puttygen.assert_not_called()
+
+
+def test_download_key_ppk_conversion_error(auth_client, new_ssh_key):
+    """Test PPK download returns controlled error when conversion fails."""
+    private_key = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        + "C" * 128
+        + "\n-----END OPENSSH PRIVATE KEY-----\n"
+    )
+
+    with patch("app.routes.keys.decrypt_access_key") as mock_decrypt, patch(
+        "app.services.ssh.keys.get_secure_temp_dir", return_value="/tmp"
+    ), patch(
+        "app.services.ssh.keys.get_puttygen_path", return_value="/usr/bin/puttygen"
+    ), patch(
+        "app.services.ssh.keys.subprocess.run"
+    ) as mock_puttygen:
+        mock_decrypt.return_value = {"success": True, "private_key": private_key}
+        mock_puttygen.return_value = Mock(
+            returncode=1,
+            stdout="",
+            stderr="conversion failed",
+        )
+
+        response = auth_client.get(
+            f"/api/keys/download/{new_ssh_key.id}/ppk", follow_redirects=True
+        )
+
+    assert response.status_code == 200
+    assert "Ошибка при скачивании .ppk".encode("utf-8") in response.data
 
 
 def test_deploy_key_success(auth_client, new_server, new_ssh_key):
