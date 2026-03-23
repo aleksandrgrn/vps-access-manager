@@ -113,9 +113,7 @@ def test_download_key_ppk_success(auth_client, new_ssh_key):
 
     with patch("app.routes.keys.decrypt_access_key") as mock_decrypt, patch(
         "app.services.ssh.keys.get_secure_temp_dir", return_value="/tmp"
-    ), patch(
-        "app.services.ssh.keys.get_puttygen_path", return_value="/usr/bin/puttygen"
-    ), patch(
+    ), patch("app.services.ssh.keys.get_puttygen_path", return_value="/usr/bin/puttygen"), patch(
         "app.services.ssh.keys.subprocess.run", side_effect=mock_puttygen
     ):
         mock_decrypt.return_value = {"success": True, "private_key": private_key}
@@ -159,9 +157,7 @@ def test_download_key_ppk_conversion_error(auth_client, new_ssh_key):
 
     with patch("app.routes.keys.decrypt_access_key") as mock_decrypt, patch(
         "app.services.ssh.keys.get_secure_temp_dir", return_value="/tmp"
-    ), patch(
-        "app.services.ssh.keys.get_puttygen_path", return_value="/usr/bin/puttygen"
-    ), patch(
+    ), patch("app.services.ssh.keys.get_puttygen_path", return_value="/usr/bin/puttygen"), patch(
         "app.services.ssh.keys.subprocess.run"
     ) as mock_puttygen:
         mock_decrypt.return_value = {"success": True, "private_key": private_key}

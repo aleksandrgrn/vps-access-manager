@@ -69,7 +69,9 @@ def convert_private_key_to_ppk(private_key: str, puttygen_path: Optional[str] = 
         )
 
         if result.returncode != 0:
-            error_message = result.stderr.strip() or "Не удалось сконвертировать ключ в формат PuTTY"
+            error_message = (
+                result.stderr.strip() or "Не удалось сконвертировать ключ в формат PuTTY"
+            )
             raise RuntimeError(error_message)
 
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
