@@ -6,7 +6,7 @@ import logging
 import shlex
 import time
 from types import SimpleNamespace
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, cast
 
 from app.services.ssh.connection import SSHConnection
 from app.services.ssh.keys import validate_ssh_public_key
@@ -35,7 +35,9 @@ def bootstrap_server_access(
     try:
         connected, error = password_connection.connect_with_password(password)
         if not connected:
-            return _failure("password_connection_failed", error or "Не удалось подключиться по паролю")
+            return _failure(
+                "password_connection_failed", error or "Не удалось подключиться по паролю"
+            )
 
         executor, privilege_error = _build_root_executor(
             connection=password_connection,
@@ -45,8 +47,7 @@ def bootstrap_server_access(
         if executor is None:
             return _failure(
                 "root_access_unavailable",
-                privilege_error
-                or "Для настройки root-доступа требуются права root/sudo",
+                privilege_error or "Для настройки root-доступа требуются права root/sudo",
             )
 
         deploy_result = _deploy_root_public_key(
@@ -216,8 +217,7 @@ def _build_root_executor(
 
     error_message = stderr or password_stderr or "Нет прав root/sudo для изменения sshd_config"
     return None, (
-        "Вход по ключу для root не может быть настроен: "
-        f"нужны права root/sudo ({error_message})"
+        "Вход по ключу для root не может быть настроен: " f"нужны права root/sudo ({error_message})"
     )
 
 
@@ -257,7 +257,10 @@ def _deploy_root_public_key(
 
     escaped_key = public_key.strip().replace("'", "'\\''")
     append_success, _, append_stderr = executor(
-        f"echo '{escaped_key}' >> /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys",
+        (
+            f"echo '{escaped_key}' >> /root/.ssh/authorized_keys && "
+            "chmod 600 /root/.ssh/authorized_keys"
+        ),
         20,
     )
     if not append_success:
@@ -284,11 +287,16 @@ def _apply_sshd_directives(
 ) -> Dict[str, object]:
     backup_path = f"/tmp/sshd_config.backup.{int(time.time() * 1000)}"
     success, stdout, stderr = executor(
-        f"cp {_SSHD_CONFIG_PATH} {shlex.quote(backup_path)} && printf %s {shlex.quote(backup_path)}",
+        (
+            f"cp {_SSHD_CONFIG_PATH} {shlex.quote(backup_path)} && "
+            f"printf %s {shlex.quote(backup_path)}"
+        ),
         20,
     )
     if not success:
-        return _failure("sshd_remediation_failed", stderr or "Не удалось создать backup sshd_config")
+        return _failure(
+            "sshd_remediation_failed", stderr or "Не удалось создать backup sshd_config"
+        )
 
     if stdout.strip():
         backup_path = stdout.strip()
@@ -349,8 +357,10 @@ def _rollback_sshd_changes(
 def _reload_sshd_command() -> str:
     return (
         "if command -v systemctl >/dev/null 2>&1; then "
-        "systemctl reload sshd || systemctl reload ssh || systemctl restart sshd || systemctl restart ssh; "
-        "else service sshd reload || service ssh reload || service sshd restart || service ssh restart; fi"
+        "systemctl reload sshd || systemctl reload ssh || "
+        "systemctl restart sshd || systemctl restart ssh; "
+        "else service sshd reload || service ssh reload || "
+        "service sshd restart || service ssh restart; fi"
     )
 
 

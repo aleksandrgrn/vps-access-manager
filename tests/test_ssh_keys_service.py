@@ -3,7 +3,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.services.ssh.keys import convert_private_key_to_ppk, get_puttygen_path, get_secure_temp_dir
+from app.services.ssh.keys import (
+    convert_private_key_to_ppk,
+    get_puttygen_path,
+    get_secure_temp_dir,
+)
 
 
 def test_get_puttygen_path_from_env_existing_file(tmp_path, monkeypatch):

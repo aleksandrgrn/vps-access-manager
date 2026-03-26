@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.models import KeyDeployment, SSHKey, Server
+from app.models import KeyDeployment, Server, SSHKey
 
 
 def test_add_server_failure_does_not_persist_without_verified_root_key_auth(auth_client):
@@ -14,7 +14,9 @@ def test_add_server_failure_does_not_persist_without_verified_root_key_auth(auth
 
     with patch("app.routes.servers.initialize_server") as mock_initialize, patch(
         "app.routes.servers.ssh_keys.generate_ssh_key"
-    ) as mock_generate_key, patch("app.routes.servers.ssh_keys.get_fingerprint") as mock_fingerprint, patch(
+    ) as mock_generate_key, patch(
+        "app.routes.servers.ssh_keys.get_fingerprint"
+    ) as mock_fingerprint, patch(
         "app.routes.servers.ssh_keys.encrypt_private_key"
     ) as mock_encrypt_key, patch(
         "app.routes.servers.ssh_bootstrap.bootstrap_server_access"
@@ -57,7 +59,9 @@ def test_sudo_user_bootstrap_success_persists_username_as_root(auth_client):
 
     with patch("app.routes.servers.initialize_server") as mock_initialize, patch(
         "app.routes.servers.ssh_keys.generate_ssh_key"
-    ) as mock_generate_key, patch("app.routes.servers.ssh_keys.get_fingerprint") as mock_fingerprint, patch(
+    ) as mock_generate_key, patch(
+        "app.routes.servers.ssh_keys.get_fingerprint"
+    ) as mock_fingerprint, patch(
         "app.routes.servers.ssh_keys.encrypt_private_key"
     ) as mock_encrypt_key, patch(
         "app.routes.servers.ssh_bootstrap.bootstrap_server_access"
@@ -92,9 +96,7 @@ def test_sudo_user_bootstrap_success_persists_username_as_root(auth_client):
 
 
 def test_bulk_import_uses_shared_root_target_flow(auth_client):
-    payload = {
-        "servers_data": "alpha admin pass 192.0.2.71 22\nbeta admin pass 192.0.2.72 22"
-    }
+    payload = {"servers_data": "alpha admin pass 192.0.2.71 22\nbeta admin pass 192.0.2.72 22"}
 
     with patch("app.routes.servers._provision_server_with_verified_key_auth") as mock_flow:
         mock_flow.side_effect = [

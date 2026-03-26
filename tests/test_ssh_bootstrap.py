@@ -7,7 +7,14 @@ from app.services.ssh.bootstrap import bootstrap_server_access
 
 @pytest.fixture
 def valid_public_key():
-    return "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDGh6W/2E6fJ6jGq9mJtU+9W0Yj6s4FQw0nP8QqvYf1J2WJY8kq1m1Ff9m8H3Q2P4L6QdK3mJxg4Q7fX0Jq3V4vV4C6Y3cM4dM1Y9K2x2P7v3cE8w9R0lM5sQ2pN7aK1mT5jV8fA3dL9kP2mR6sW0qY3vT6bN1pL8zR4xC7vH2qF5mJ9nK3pD6wT1bV4eN7qR0xM3sZ6cP9vB2nH5jK8mL1q test@example.com"
+    return (
+        "ssh-rsa "
+        "AAAAB3NzaC1yc2EAAAADAQABAAABAQDGh6W/2E6fJ6jGq9mJtU+9W0Yj6s4FQw0n"
+        "P8QqvYf1J2WJY8kq1m1Ff9m8H3Q2P4L6QdK3mJxg4Q7fX0Jq3V4vV4C6Y3cM4dM1"
+        "Y9K2x2P7v3cE8w9R0lM5sQ2pN7aK1mT5jV8fA3dL9kP2mR6sW0qY3vT6bN1pL8zR4"
+        "xC7vH2qF5mJ9nK3pD6wT1bV4eN7qR0xM3sZ6cP9vB2nH5jK8mL1q "
+        "test@example.com"
+    )
 
 
 @pytest.fixture
@@ -49,7 +56,9 @@ class TestBootstrapServerAccess:
         assert result["success"] is True
         assert result["verified"] is True
         assert result["target_username"] == "root"
-        assert any("/root/.ssh" in call.args[0] for call in password_connection.execute.call_args_list)
+        assert any(
+            "/root/.ssh" in call.args[0] for call in password_connection.execute.call_args_list
+        )
         assert mock_connection_class.call_args_list[1].args == ("192.0.2.10", 22, "root")
 
     @patch("app.services.ssh.bootstrap.validate_ssh_public_key", return_value=True)
@@ -140,7 +149,12 @@ class TestBootstrapServerAccess:
             (True, "/tmp/sshd_config.backup.1", ""),
             (
                 True,
-                "Include /etc/ssh/sshd_config.d/*.conf\nPermitRootLogin no\nPasswordAuthentication no\nPubkeyAuthentication no\n",
+                (
+                    "Include /etc/ssh/sshd_config.d/*.conf\n"
+                    "PermitRootLogin no\n"
+                    "PasswordAuthentication no\n"
+                    "PubkeyAuthentication no\n"
+                ),
                 "",
             ),
             (True, "", ""),
@@ -178,7 +192,11 @@ class TestBootstrapServerAccess:
         assert result["success"] is True
         assert result["remediated"] is True
         remediation_commands = [call.args[0] for call in password_connection.execute.call_args_list]
-        write_commands = [command for command in remediation_commands if "cat > /etc/ssh/sshd_config <<" in command]
+        write_commands = [
+            command
+            for command in remediation_commands
+            if "cat > /etc/ssh/sshd_config <<" in command
+        ]
         assert write_commands
         write_command = write_commands[0]
         assert "# Include /etc/ssh/sshd_config.d/*.conf" in write_command

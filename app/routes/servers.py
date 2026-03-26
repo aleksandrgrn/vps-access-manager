@@ -25,8 +25,8 @@ from flask_login import current_user, login_required
 from app import db
 from app.forms import ServerForm
 from app.models import KeyDeployment, Log, Server, ServerCategory, SSHKey
-from app.services.ssh import keys as ssh_keys
 from app.services.ssh import bootstrap as ssh_bootstrap
+from app.services.ssh import keys as ssh_keys
 from app.services.ssh.server_manager import initialize_server, test_connection
 from app.utils import add_log
 
@@ -67,7 +67,9 @@ def _provision_server_with_verified_key_auth(
 
         init_result = initialize_server(ip_address, port, username, password)
         if not init_result["success"]:
-            add_log("add_server_failed", details={"ip": ip_address, "error": init_result["message"]})
+            add_log(
+                "add_server_failed", details={"ip": ip_address, "error": init_result["message"]}
+            )
             return {
                 "success": False,
                 "status_code": 400,
@@ -183,8 +185,7 @@ def _provision_server_with_verified_key_auth(
             "success": True,
             "status_code": 200,
             "message": (
-                "Сервер успешно добавлен. "
-                f"OpenSSH версия: {openssh_version}. Key auth verified."
+                "Сервер успешно добавлен. " f"OpenSSH версия: {openssh_version}. Key auth verified."
             ),
             "server_name": new_server.name,
             "ip_address": new_server.ip_address,
@@ -340,9 +341,10 @@ def add_server() -> Any:
             category_ids=data.get("category_ids", []),
             requires_legacy_ssh_override=data.get("requires_legacy_ssh", False),
         )
-        return jsonify({"success": result["success"], "message": result["message"]}), result[
-            "status_code"
-        ]
+        return (
+            jsonify({"success": result["success"], "message": result["message"]}),
+            result["status_code"],
+        )
 
     except Exception as e:
         logger.error(f"[ADD_SERVER_FATAL] Непредвиденная ошибка: {str(e)}")
