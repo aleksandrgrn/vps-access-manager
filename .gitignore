@@ -111,11 +111,15 @@ config/credentials/
 known_hosts.json
 paste.txt
 *.secret
+CONTINUITY.md
 
 # Windsurf / Editor
 .windsurf/
 .cascade/
 .venv/
+.venv-builder/
+.venv-linux/
+.playwright-cli/
 
 # MyPy и линтеры (добавлено)
 .mypy_cache/
