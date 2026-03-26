@@ -20,16 +20,19 @@
 
 ### 🖥️ Управление серверами
 - **CRUD операции**: Добавление, редактирование, удаление серверов
+- **Root-target onboarding**: `add_server` и `bulk import` принимают bootstrap login (`root` или sudo-user), но после успешного onboarding сервер сохраняется как `username=root`
 - **Категории и Теги**: Организация серверов по категориям (Prod, Dev, Test) и произвольным тегам для удобной фильтрации
 - **Проверка доступности**: Пинг серверов и проверка SSH-подключения
 - **Синхронизация**: Обновление информации о хостнейме и ОС
-- **Массовый импорт**: Импорт серверов из JSON с автоматическим назначением категорий
+- **Массовый импорт**: Импорт серверов из JSON по тому же bootstrap contract с автоматическим назначением категорий
 
 ### 🚀 Развертывание и безопасность
 - **Автоматическое развертывание**: Развертывание публичных ключей на серверы в один клик
+- **Bootstrap access key**: Ключ доступа разворачивается пользователю `root`, а повторная проверка после onboarding выполняется как `root`
 - **Шифрование**: Все приватные ключи зашифрованы с использованием Fernet
 - **Отзыв доступа**: Отзыв развернутых ключей с серверов (массово или индивидуально)
-- **Legacy SSH**: Автоматическое определение и поддержка старых версий OpenSSH
+- **SSH remediation**: При необходимости нормализует основной `/etc/ssh/sshd_config` для root bootstrap и SSH-совместимости
+- **Legacy SSH**: Автоматическое определение и поддержка старых версий OpenSSH без изменения `HostKeyAlgorithms` в remediation
 
 ### 📊 Мониторинг и аудит
 - **Отслеживание развертываний**: Просмотр статуса развернутых ключей на каждом сервере
@@ -374,10 +377,12 @@ python seed_db.py
 1. Перейти в раздел **"Серверы"**
 2. Нажать **"Добавить сервер"**
 3. Заполнить форму:
-   - Название сервера (например, `prod-web-01`)
-   - IP адрес (например, `192.168.1.100`)
-   - SSH порт (по умолчанию `22`)
-   - Имя пользователя (например, `root` или `ubuntu`)
+    - Название сервера (например, `prod-web-01`)
+    - IP адрес (например, `192.168.1.100`)
+    - SSH порт (по умолчанию `22`)
+    - Имя пользователя для bootstrap входа (например, `root` или sudo-user `ubuntu`)
+
+> После успешного onboarding сервер сохраняется как `username=root`. Для массового импорта действует тот же контракт: bootstrap login может быть пользовательским, но рабочее подключение и fresh verify выполняются как `root`.
 
 #### Шаг 2.5️⃣ Организовать серверы по категориям (опционально)
 
@@ -390,6 +395,14 @@ python seed_db.py
 - Быстрая фильтрация серверов при массовом развёртывании ключей
 - Визуальная группировка в интерфейсе
 - Цветовая маркировка для удобства навигации
+
+#### Что происходит при onboarding
+
+- `add_server` и `bulk import` работают по root-target bootstrap contract
+- Первый логин может быть под `root` или под sudo-user
+- После успешной подготовки запись сервера сохраняется как `root`
+- Access key разворачивается пользователю `root`
+- Fresh verify после onboarding выполняется как `root`
 
 #### Шаг 3️⃣ Развернуть ключ на сервер(ы)
 
@@ -440,11 +453,11 @@ python seed_db.py
 |-------|----------|---------|--------------|
 | GET | `/api/dashboard` | Главная панель управления | ✓ |
 | GET | `/api/servers` | Список серверов пользователя | ✓ |
-| POST | `/api/servers/add` | Добавить новый сервер | ✓ |
+| POST | `/api/servers/add` | Добавить сервер по root-target bootstrap contract | ✓ |
 | POST | `/api/servers/edit/<id>` | Редактировать сервер | ✓ |
 | POST | `/api/servers/delete/<id>` | Удалить сервер | ✓ |
 | POST | `/api/servers/test/<id>` | Тест соединения с сервером | ✓ |
-| POST | `/api/bulk-import-servers` | Массовый импорт серверов с категориями (JSON) | ✓ |
+| POST | `/api/bulk-import-servers` | Массовый импорт серверов с категориями по тому же bootstrap contract | ✓ |
 | GET | `/api/categories` | Список категорий пользователя | ✓ |
 | POST | `/api/categories` | Создать новую категорию | ✓ |
 | DELETE | `/api/categories/<id>` | Удалить категорию | ✓ |
@@ -494,7 +507,7 @@ python seed_db.py
 | `name` | STRING(100) | Название сервера |
 | `ip_address` | STRING(45) | IP адрес (IPv4/IPv6) |
 | `ssh_port` | INTEGER | SSH порт (по умолчанию 22) |
-| `username` | STRING(100) | Пользователь для SSH |
+| `username` | STRING(100) | Рабочий SSH пользователь; после успешного onboarding сохраняется как `root` |
 | `status` | STRING(20) | Статус (`online`, `offline`, `unknown`) |
 | `last_check` | TIMESTAMP | Время последней проверки |
 | `openssh_version` | STRING(20) | Версия OpenSSH на сервере |
@@ -576,23 +589,37 @@ python seed_db.py
 tail -f logs/app.log
 
 # 3. Проверить SSH соединение вручную
-ssh -i ~/.ssh/your_key.pem -p 22 user@192.168.1.100
+ssh -i ~/.ssh/your_key.pem -p 22 root@192.168.1.100
 
 # 4. Проверить конфигурацию SSH на сервере
-ssh user@192.168.1.100 "cat ~/.ssh/authorized_keys"
+ssh root@192.168.1.100 "cat ~/.ssh/authorized_keys"
 ```
+
+### Примечание: SSH remediation и bootstrap
+
+- Bootstrap login может быть под `root` или под sudo-user, но после успешной подготовки сервер сохраняется как `username=root`
+- Если включается remediation, проект работает через основной `/etc/ssh/sshd_config`
+- `Include` для `sshd_config.d` комментируется, затем нормализуются:
+  - `PermitRootLogin yes`
+  - `PasswordAuthentication yes`
+  - `PubkeyAuthentication yes`
+  - `PubkeyAcceptedAlgorithms +ssh-rsa`
+  - `PubkeyAcceptedKeyTypes +ssh-rsa`
+- `HostKeyAlgorithms` remediation не меняет
+- Поведение подтверждено на Ubuntu 24, Rocky 9, CentOS 7, а также с пользовательскими ключами
+- Управление root password не входит в текущий scope и документируется отдельно
 
 ### Проблема: Ошибка при развертывании ключа
 
 ```bash
 # 1. Проверить права доступа на сервере
-ssh user@server "ls -la ~/.ssh/"
+ssh root@server "ls -la ~/.ssh/"
 
 # 2. Проверить размер файла authorized_keys
-ssh user@server "wc -l ~/.ssh/authorized_keys"
+ssh root@server "wc -l ~/.ssh/authorized_keys"
 
 # 3. Проверить логи SSH сервера
-ssh user@server "tail -20 /var/log/auth.log"
+ssh root@server "tail -20 /var/log/auth.log"
 
 # 4. Проверить, что ключ в правильном формате
 python -c "from cryptography.hazmat.primitives import serialization; print('OK')"
@@ -631,18 +658,18 @@ flask db history
 
 ```bash
 # 1. Проверить версию OpenSSH на сервере
-ssh user@server "ssh -V"
+ssh root@server "ssh -V"
 
 # 2. Если версия < 7.0, система автоматически включит поддержку legacy алгоритмов
 # Проверить флаг requires_legacy_ssh в БД
 
-# 3. Для ручного включения legacy алгоритмов:
+# 3. Для ручной client-side диагностики при необходимости:
 # Отредактировать конфиг SSH клиента ~/.ssh/config
 Host old-server
     HostName 192.168.1.100
     User root
     PubkeyAcceptedAlgorithms +ssh-rsa
-    HostkeyAlgorithms +ssh-rsa
+    PubkeyAcceptedKeyTypes +ssh-rsa
 ```
 
 ### Команды диагностики
@@ -715,7 +742,8 @@ decrypted = cipher.decrypt(encrypted)
 
 1. Определяет версию OpenSSH при первом подключении
 2. Устанавливает флаг `requires_legacy_ssh`
-3. Использует расширенные алгоритмы при необходимости
+3. Использует расширенные RSA-алгоритмы при необходимости
+4. Не меняет `HostKeyAlgorithms` через remediation
 
 ```python
 # Пример конфигурации для legacy SSH
@@ -774,6 +802,7 @@ ssh_config = {
 
 ## 📝 Последние обновления (v4.0)
 
+- **Onboarding/SSH**: `add_server` и `bulk import` переведены на root-target bootstrap contract; после успеха сервер сохраняется как `root`, а remediation выполняется через основной `/etc/ssh/sshd_config`
 - **UI/UX**: Улучшен интерфейс управления ключами (скрытие служебных ключей, модальные окна, тултипы)
 - **Безопасность**: Добавлена возможность скачивания приватных ключей в формате `.pem`
 - **Фильтры**: Расширенные фильтры при выборе серверов для деплоя (по категориям и статусу)
@@ -784,7 +813,7 @@ ssh_config = {
 ---
 
 **Версия:** 4.0  
-**Последнее обновление:** Декабрь 2025  
+**Последнее обновление:** Март 2026  
 **Язык:** Python 3.8+  
 **Framework:** Flask 3.0.0  
 **Архитектура:** Flask Blueprints + Application Factory
