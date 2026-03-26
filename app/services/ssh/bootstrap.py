@@ -285,21 +285,24 @@ def _build_remediation_directives() -> List[str]:
 def _apply_sshd_directives(
     executor: Callable[[str, int], Tuple[bool, str, str]], directives: List[str]
 ) -> Dict[str, object]:
-    backup_path = f"/tmp/sshd_config.backup.{int(time.time() * 1000)}"
-    success, stdout, stderr = executor(
-        (
-            f"cp {_SSHD_CONFIG_PATH} {shlex.quote(backup_path)} && "
-            f"printf %s {shlex.quote(backup_path)}"
-        ),
+    backup_path = f"sshd_config.backup.{int(time.time() * 1000)}"
+    path_success, stdout, stderr = executor("mktemp -t sshd_config.backup.XXXXXXXXXX", 20)
+    if not path_success:
+        return _failure(
+            "sshd_remediation_failed", stderr or "Не удалось создать временный backup sshd_config"
+        )
+
+    if stdout.strip():
+        backup_path = stdout.strip()
+
+    success, _, stderr = executor(
+        f"cp {_SSHD_CONFIG_PATH} {shlex.quote(backup_path)}",
         20,
     )
     if not success:
         return _failure(
             "sshd_remediation_failed", stderr or "Не удалось создать backup sshd_config"
         )
-
-    if stdout.strip():
-        backup_path = stdout.strip()
 
     read_success, current_config, read_stderr = executor(f"cat {_SSHD_CONFIG_PATH}", 20)
     if not read_success:
