@@ -5,11 +5,12 @@ VPS Manager Application Factory
 """
 
 import os
+import secrets
 from datetime import timedelta
 from typing import Optional
 
 from dotenv import load_dotenv
-from flask import Flask, request
+from flask import Flask, current_app, request
 from flask.json.provider import DefaultJSONProvider
 from flask_login import LoginManager
 from flask_migrate import Migrate
@@ -74,6 +75,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
         WTF_CSRF_CHECK_DEFAULT=True,
         WTF_CSRF_SSL_STRICT=False,
         JSON_AS_ASCII=False,
+        SERVICE_ACCOUNT_TOKEN=os.environ.get("SERVICE_ACCOUNT_TOKEN", ""),
     )
 
     # Конфигурация для тестирования
@@ -112,12 +114,34 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
     app.register_blueprint(categories.bp, url_prefix="/api")
 
+    from app.routes import api_svc
+
+    app.register_blueprint(api_svc.bp, url_prefix="/api/svc")
+    csrf.exempt(api_svc.bp)
+    # Без валидного Bearer-токена — 401 JSON, а не redirect на /login (сессионные
+    # маршруты используют login_manager.login_view="auth.login" как обычно).
+    login_manager.blueprint_login_views["api_svc"] = None
+
     # Загрузчик пользователя для Flask-Login
     from app.models import User
 
     @login_manager.user_loader
     def load_user(user_id: str):
         return User.query.get(int(user_id))
+
+    @login_manager.request_loader
+    def load_user_from_token(req):
+        # Только для /api/svc — session-маршруты этот loader не затрагивает.
+        if not req.path.startswith("/api/svc"):
+            return None
+        auth = req.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return None
+        token = auth[7:]
+        expected = current_app.config.get("SERVICE_ACCOUNT_TOKEN", "")
+        if not expected or not secrets.compare_digest(token, expected):
+            return None
+        return User.query.filter_by(username="pass-manager-svc").first()
 
     # CLI команды
     @app.cli.command("init-db")

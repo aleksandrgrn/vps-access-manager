@@ -94,6 +94,7 @@ class Server(db.Model):
     openssh_version = db.Column(db.String(20), nullable=True)
     requires_legacy_ssh = db.Column(db.Boolean, default=False, nullable=False)
     access_key_id = db.Column(db.Integer, db.ForeignKey("ssh_keys.id"), nullable=True)
+    bootstrap_request_id = db.Column(db.String(64), unique=True, nullable=True, index=True)
 
     # Relationships
     access_key = db.relationship("SSHKey", foreign_keys=[access_key_id], backref="server_access")

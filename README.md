@@ -483,6 +483,22 @@ python seed_db.py
 | POST | `/api/key-deployments/revoke` | Отозвать развернутый ключ | ✓ |
 | POST | `/api/key-deployments/filter` | Фильтрация развертываний | ✓ |
 
+### Service Blueprint (`/api/svc`) — Track C
+
+Служебный контракт для pass-manager (автоматизация онбординга). Аутентификация — **только Bearer-токен** (`SERVICE_ACCOUNT_TOKEN`), не сессия; все операции выполняются от служебного пользователя `pass-manager-svc`. Blueprint `@csrf.exempt`; слушать только на `127.0.0.1`. Проектные детали — в `ARCHITECTURE.md`.
+
+| Метод | Endpoint | Описание |
+|-------|----------|---------|
+| POST | `/api/svc/servers/add` | Bootstrap сервера (идемпотентно по `bootstrap_request_id`) |
+| GET | `/api/svc/keys` | Список ключей svc-аккаунта |
+| POST | `/api/svc/keys/generate` | Сгенерировать ключ (dedup по fingerprint) |
+| POST | `/api/svc/keys/deploy` | Развернуть ключ на сервер (идемпотентно) |
+| POST | `/api/svc/key-deployments/revoke` | Отозвать ключ с сервера |
+| POST | `/api/svc/keys/revoke-all/<id>` | Отозвать ключ со всех серверов |
+| GET | `/api/svc/servers` | Список серверов svc-аккаунта |
+| POST | `/api/svc/servers/test/<id>` | Тест SSH-соединения |
+| GET | `/api/svc/servers/<id>/access-key` | Приватный per-server root-ключ (Fernet-decrypt) |
+
 ---
 
 ## 🗄️ Структура базы данных
