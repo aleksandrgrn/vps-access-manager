@@ -44,6 +44,7 @@ def _server_to_dict(server: Server) -> Dict[str, Any]:
         "ip_address": server.ip_address,
         "ssh_port": server.ssh_port,
         "status": server.status,
+        "categories": [c.name for c in server.categories],
     }
 
 
@@ -310,3 +311,28 @@ def get_access_key(server_id: int) -> Tuple[Dict[str, Any], int]:
         return jsonify({"success": False, "message": decrypt_result["message"]}), 500
 
     return jsonify({"success": True, "private_key": decrypt_result["private_key"]}), 200
+
+
+# ---------------------------------------------------------------------------
+# E9 — активные раскатки ключей (для импорта парка в pass-manager)
+# ---------------------------------------------------------------------------
+@bp.route("/key-deployments", methods=["GET"])
+@login_required
+def list_key_deployments() -> Tuple[Dict[str, Any], int]:
+    deployments = KeyDeployment.query.filter_by(revoked_at=None).all()
+    return (
+        jsonify(
+            {
+                "success": True,
+                "deployments": [
+                    {
+                        "key_id": d.ssh_key_id,
+                        "server_id": d.server_id,
+                        "deployed_at": d.deployed_at.isoformat() if d.deployed_at else None,
+                    }
+                    for d in deployments
+                ],
+            }
+        ),
+        200,
+    )

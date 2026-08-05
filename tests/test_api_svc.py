@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from app import create_app, db
-from app.models import KeyDeployment, Server, SSHKey, User
+from app.models import KeyDeployment, Server, ServerCategory, SSHKey, User
 
 SERVICE_TOKEN = "test-service-token-abc123"
 
@@ -503,6 +503,119 @@ def test_e8_get_access_key_foreign_server_allowed(client, svc_user, other_user):
     data = response.get_json()
     assert data["success"] is True
     assert data["private_key"] == plaintext_pem
+
+
+# ---------------------------------------------------------------------------
+# E6 — категории в списке серверов (FIX B0.2)
+# ---------------------------------------------------------------------------
+
+
+def test_e6_server_with_categories_returns_names(client, svc_user):
+    server = Server(
+        name="cat-srv", ip_address="192.0.2.70", username="root", user_id=svc_user.id, ssh_port=22
+    )
+    prod = ServerCategory(name="prod")
+    dev = ServerCategory(name="dev")
+    db.session.add_all([server, prod, dev])
+    server.categories.append(prod)
+    server.categories.append(dev)
+    db.session.commit()
+
+    response = client.get("/api/svc/servers", headers=auth_headers())
+    assert response.status_code == 200
+    servers = response.get_json()["servers"]
+    assert len(servers) == 1
+    assert sorted(servers[0]["categories"]) == ["dev", "prod"]
+
+
+def test_e6_server_without_categories_returns_empty_list(client, svc_user):
+    server = Server(
+        name="no-cat-srv",
+        ip_address="192.0.2.71",
+        username="root",
+        user_id=svc_user.id,
+        ssh_port=22,
+    )
+    db.session.add(server)
+    db.session.commit()
+
+    response = client.get("/api/svc/servers", headers=auth_headers())
+    assert response.status_code == 200
+    servers = response.get_json()["servers"]
+    assert len(servers) == 1
+    assert "categories" in servers[0]
+    assert servers[0]["categories"] == []
+
+
+# ---------------------------------------------------------------------------
+# E9 — активные раскатки ключей (FIX B0.2)
+# ---------------------------------------------------------------------------
+
+
+def test_e9_returns_active_deployment(client, svc_user):
+    server = Server(
+        name="srv", ip_address="192.0.2.80", username="root", user_id=svc_user.id, ssh_port=22
+    )
+    key = SSHKey(
+        name="k",
+        public_key="ssh-rsa AAAA...",
+        private_key_encrypted=b"x",
+        fingerprint="fp-e9-active",
+        key_type="rsa",
+        user_id=svc_user.id,
+    )
+    db.session.add_all([server, key])
+    db.session.flush()
+    deployment = KeyDeployment(ssh_key_id=key.id, server_id=server.id, deployed_by=svc_user.id)
+    db.session.add(deployment)
+    db.session.commit()
+
+    response = client.get("/api/svc/key-deployments", headers=auth_headers())
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    deployments = data["deployments"]
+    assert len(deployments) == 1
+    assert deployments[0]["key_id"] == key.id
+    assert deployments[0]["server_id"] == server.id
+    assert deployments[0]["deployed_at"]
+
+
+def test_e9_excludes_revoked_deployment(client, svc_user):
+    from datetime import datetime, timezone
+
+    server = Server(
+        name="srv", ip_address="192.0.2.81", username="root", user_id=svc_user.id, ssh_port=22
+    )
+    key = SSHKey(
+        name="k",
+        public_key="ssh-rsa AAAA...",
+        private_key_encrypted=b"x",
+        fingerprint="fp-e9-revoked",
+        key_type="rsa",
+        user_id=svc_user.id,
+    )
+    db.session.add_all([server, key])
+    db.session.flush()
+    revoked = KeyDeployment(
+        ssh_key_id=key.id,
+        server_id=server.id,
+        deployed_by=svc_user.id,
+        revoked_at=datetime.now(timezone.utc),
+    )
+    db.session.add(revoked)
+    db.session.commit()
+
+    response = client.get("/api/svc/key-deployments", headers=auth_headers())
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["deployments"] == []
+
+
+def test_e9_without_token_returns_401(client, svc_user):
+    response = client.get("/api/svc/key-deployments")
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
