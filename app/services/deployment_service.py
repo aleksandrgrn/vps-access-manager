@@ -19,7 +19,9 @@ from app.utils import add_log
 logger = logging.getLogger(__name__)
 
 
-def deploy_key_to_servers(user_id: int, key_id: int, server_ids: List[int]) -> Dict[str, Any]:
+def deploy_key_to_servers(
+    user_id: int, key_id: int, server_ids: List[int], bypass_owner: bool = False
+) -> Dict[str, Any]:
     """
     Deploy an SSH key to multiple servers.
 
@@ -27,6 +29,7 @@ def deploy_key_to_servers(user_id: int, key_id: int, server_ids: List[int]) -> D
         user_id: ID of the user performing the action.
         key_id: ID of the SSH key to deploy.
         server_ids: List of server IDs to deploy to.
+        bypass_owner: If True, skip owner checks (service account path only).
 
     Returns:
         Dict containing success status, message, and detailed results.
@@ -48,7 +51,7 @@ def deploy_key_to_servers(user_id: int, key_id: int, server_ids: List[int]) -> D
             "error_type": "key_not_found",
         }
 
-    if key.user_id != user_id:
+    if not bypass_owner and key.user_id != user_id:
         return {
             "success": False,
             "message": "Access denied to this key",
@@ -82,7 +85,7 @@ def deploy_key_to_servers(user_id: int, key_id: int, server_ids: List[int]) -> D
                 failed_count += 1
                 continue
 
-            if server.user_id != user_id:
+            if not bypass_owner and server.user_id != user_id:
                 results.append(
                     {
                         "server_id": server_id,
@@ -250,13 +253,16 @@ def deploy_key_to_servers(user_id: int, key_id: int, server_ids: List[int]) -> D
     }
 
 
-def revoke_deployment_by_id(user_id: int, deployment_id: int) -> Dict[str, Any]:
+def revoke_deployment_by_id(
+    user_id: int, deployment_id: int, bypass_owner: bool = False
+) -> Dict[str, Any]:
     """
     Revoke a specific key deployment by its ID.
 
     Args:
         user_id: ID of the user performing the action.
         deployment_id: ID of the KeyDeployment to revoke.
+        bypass_owner: If True, skip owner checks (service account path only).
 
     Returns:
         Dict with success status and details.
@@ -282,7 +288,7 @@ def revoke_deployment_by_id(user_id: int, deployment_id: int) -> Dict[str, Any]:
     server = deployment.server
 
     # Check access
-    if key_to_revoke.user_id != user_id:
+    if not bypass_owner and key_to_revoke.user_id != user_id:
         return {
             "success": False,
             "message": "Access denied to this key",
@@ -388,7 +394,9 @@ def revoke_deployment_by_id(user_id: int, deployment_id: int) -> Dict[str, Any]:
         }
 
 
-def revoke_key_from_server_by_ids(user_id: int, key_id: int, server_id: int) -> Dict[str, Any]:
+def revoke_key_from_server_by_ids(
+    user_id: int, key_id: int, server_id: int, bypass_owner: bool = False
+) -> Dict[str, Any]:
     """
     Revoke a key from a specific server using IDs.
     Finds the active deployment and calls revoke_deployment_by_id logic.
@@ -397,6 +405,7 @@ def revoke_key_from_server_by_ids(user_id: int, key_id: int, server_id: int) -> 
         user_id: ID of the user.
         key_id: ID of the SSH key.
         server_id: ID of the server.
+        bypass_owner: If True, skip owner checks (service account path only).
 
     Returns:
         Dict with result.
@@ -409,7 +418,7 @@ def revoke_key_from_server_by_ids(user_id: int, key_id: int, server_id: int) -> 
     if not key_to_revoke or not server:
         return {"success": False, "message": "Key or Server not found", "error_type": "not_found"}
 
-    if key_to_revoke.user_id != user_id:
+    if not bypass_owner and key_to_revoke.user_id != user_id:
         return {"success": False, "message": "Access denied", "error_type": "access_denied"}
 
     # Find active deployment
@@ -425,16 +434,17 @@ def revoke_key_from_server_by_ids(user_id: int, key_id: int, server_id: int) -> 
         }
 
     # Reuse the logic by ID
-    return revoke_deployment_by_id(user_id, deployment.id)
+    return revoke_deployment_by_id(user_id, deployment.id, bypass_owner=bypass_owner)
 
 
-def revoke_key_globally(user_id: int, key_id: int) -> Dict[str, Any]:
+def revoke_key_globally(user_id: int, key_id: int, bypass_owner: bool = False) -> Dict[str, Any]:
     """
     Revoke a key from ALL servers where it is currently deployed.
 
     Args:
         user_id: ID of the user.
         key_id: ID of the SSH key.
+        bypass_owner: If True, skip owner checks (service account path only).
 
     Returns:
         Dict with bulk results.
@@ -445,7 +455,7 @@ def revoke_key_globally(user_id: int, key_id: int) -> Dict[str, Any]:
     if not key_to_revoke:
         return {"success": False, "message": "Key not found", "error_type": "not_found"}
 
-    if key_to_revoke.user_id != user_id:
+    if not bypass_owner and key_to_revoke.user_id != user_id:
         return {"success": False, "message": "Access denied", "error_type": "access_denied"}
 
     # Find all active deployments

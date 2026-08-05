@@ -121,7 +121,7 @@ def add_server() -> Tuple[Dict[str, Any], int]:
 @bp.route("/keys", methods=["GET"])
 @login_required
 def list_keys() -> Tuple[Dict[str, Any], int]:
-    query = SSHKey.query.filter_by(user_id=current_user.id)
+    query = SSHKey.query
     name_fragment = request.args.get("name")
     if name_fragment:
         query = query.filter(SSHKey.name.ilike(f"%{name_fragment}%"))
@@ -155,7 +155,9 @@ def generate_key() -> Tuple[Dict[str, Any], int]:
         return jsonify({"success": False, "message": "Не удалось вычислить fingerprint ключа."}), 500
 
     # Dedup по fingerprint (как в keys.py:106) — не плодим дубликаты.
-    existing_key = SSHKey.query.filter_by(user_id=current_user.id, fingerprint=fingerprint).first()
+    # Фильтр по владельцу не ставим: fingerprint уникален на всю таблицу (app/models.py:121),
+    # иначе дедуп не увидит чужой ключ с тем же отпечатком и INSERT упадёт на уникальном индексе.
+    existing_key = SSHKey.query.filter_by(fingerprint=fingerprint).first()
     if existing_key:
         return jsonify({"success": True, "message": "Ключ с таким fingerprint уже существует", **_key_to_dict(existing_key)}), 200
 
@@ -201,7 +203,7 @@ def deploy_key() -> Tuple[Dict[str, Any], int]:
         return jsonify({"success": True, "message": "Ключ уже развёрнут на этом сервере"}), 200
 
     result = deployment_service.deploy_key_to_servers(
-        user_id=current_user.id, key_id=key_id, server_ids=[server_id]
+        user_id=current_user.id, key_id=key_id, server_ids=[server_id], bypass_owner=True
     )
 
     if not result["success"] or result.get("success_count", 0) == 0:
@@ -236,7 +238,7 @@ def revoke_deployment() -> Tuple[Dict[str, Any], int]:
         return jsonify({"success": False, "message": "key_id и server_id обязательны"}), 400
 
     result = deployment_service.revoke_key_from_server_by_ids(
-        user_id=current_user.id, key_id=key_id, server_id=server_id
+        user_id=current_user.id, key_id=key_id, server_id=server_id, bypass_owner=True
     )
 
     return jsonify(result), (200 if result["success"] else 400)
@@ -248,7 +250,9 @@ def revoke_deployment() -> Tuple[Dict[str, Any], int]:
 @bp.route("/keys/revoke-all/<int:key_id>", methods=["POST"])
 @login_required
 def revoke_key_all(key_id: int) -> Tuple[Dict[str, Any], int]:
-    result = deployment_service.revoke_key_globally(user_id=current_user.id, key_id=key_id)
+    result = deployment_service.revoke_key_globally(
+        user_id=current_user.id, key_id=key_id, bypass_owner=True
+    )
     return jsonify(result), (200 if result["success"] else 400)
 
 
@@ -258,7 +262,7 @@ def revoke_key_all(key_id: int) -> Tuple[Dict[str, Any], int]:
 @bp.route("/servers", methods=["GET"])
 @login_required
 def list_servers() -> Tuple[Dict[str, Any], int]:
-    query = Server.query.filter_by(user_id=current_user.id)
+    query = Server.query
     name_fragment = request.args.get("name")
     if name_fragment:
         query = query.filter(Server.name.ilike(f"%{name_fragment}%"))
@@ -274,7 +278,7 @@ def list_servers() -> Tuple[Dict[str, Any], int]:
 @login_required
 def test_server(server_id: int) -> Tuple[Dict[str, Any], int]:
     server = Server.query.get(server_id)
-    if not server or server.user_id != current_user.id:
+    if not server:
         return jsonify({"success": False, "message": "Сервер не найден"}), 404
 
     if not server.access_key:
@@ -295,7 +299,7 @@ def test_server(server_id: int) -> Tuple[Dict[str, Any], int]:
 @login_required
 def get_access_key(server_id: int) -> Tuple[Dict[str, Any], int]:
     server = Server.query.get(server_id)
-    if not server or server.user_id != current_user.id:
+    if not server:
         return jsonify({"success": False, "message": "Сервер не найден"}), 404
 
     if not server.access_key:

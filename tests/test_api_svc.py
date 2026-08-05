@@ -289,7 +289,9 @@ def test_e4_deploy_key_calls_deployment_service(client, svc_user):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    mock_deploy.assert_called_once_with(user_id=svc_user.id, key_id=key.id, server_ids=[server.id])
+    mock_deploy.assert_called_once_with(
+        user_id=svc_user.id, key_id=key.id, server_ids=[server.id], bypass_owner=True
+    )
 
 
 def test_e4_deploy_key_idempotent_when_already_deployed(client, svc_user):
@@ -341,7 +343,9 @@ def test_e5a_revoke_deployment_by_ids(client, svc_user):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    mock_revoke.assert_called_once_with(user_id=svc_user.id, key_id=1, server_id=2)
+    mock_revoke.assert_called_once_with(
+        user_id=svc_user.id, key_id=1, server_id=2, bypass_owner=True
+    )
 
 
 def test_e5b_revoke_key_globally(client, svc_user):
@@ -352,7 +356,7 @@ def test_e5b_revoke_key_globally(client, svc_user):
 
     assert response.status_code == 200
     assert response.get_json()["success"] is True
-    mock_revoke.assert_called_once_with(user_id=svc_user.id, key_id=5)
+    mock_revoke.assert_called_once_with(user_id=svc_user.id, key_id=5, bypass_owner=True)
 
 
 # ---------------------------------------------------------------------------
@@ -458,19 +462,47 @@ def test_e8_get_access_key_returns_decrypted_private_key(client, svc_user):
     assert data["private_key"] == plaintext_pem
 
 
-def test_e8_get_access_key_denies_foreign_server(client, svc_user, other_user):
+def test_e8_get_access_key_foreign_server_allowed(client, svc_user, other_user):
+    """
+    B0.1: фильтр владельца в /api/svc снят. Сервер другого пользователя
+    теперь обрабатывается служебной учёткой (а не отклоняется с 404).
+    """
+    from app.services.ssh import keys as ssh_keys_service
+
+    encryption_key = __import__("os").environ["ENCRYPTION_KEY"]
+    plaintext_pem = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQ\n"
+        "-----END OPENSSH PRIVATE KEY-----"
+    )
+    encrypted = ssh_keys_service.encrypt_private_key(plaintext_pem, encryption_key)
+
+    key = SSHKey(
+        name="foreign-key",
+        public_key="ssh-rsa AAAA...",
+        private_key_encrypted=encrypted,
+        fingerprint="fp-foreign",
+        key_type="rsa",
+        user_id=other_user.id,
+    )
+    db.session.add(key)
+    db.session.flush()
     server = Server(
         name="not-mine",
         ip_address="192.0.2.60",
         username="root",
         user_id=other_user.id,
         ssh_port=22,
+        access_key_id=key.id,
     )
     db.session.add(server)
     db.session.commit()
 
     response = client.get(f"/api/svc/servers/{server.id}/access-key", headers=auth_headers())
-    assert response.status_code == 404
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["private_key"] == plaintext_pem
 
 
 # ---------------------------------------------------------------------------

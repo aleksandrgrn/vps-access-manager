@@ -406,7 +406,7 @@ class TestRevokeKeyFromServerByIds:
         )
 
         assert result["success"] is True
-        mock_revoke_by_id.assert_called_once_with(1, mock_deployment.id)
+        mock_revoke_by_id.assert_called_once_with(1, mock_deployment.id, bypass_owner=False)
 
     @patch("app.services.deployment_service.Server")
     @patch("app.services.deployment_service.SSHKey")
@@ -521,3 +521,253 @@ class TestRevokeKeyGlobally:
         assert result["total"] == 0
         assert result["completed"] == 0
         assert "No active deployments" in result["message"]
+
+
+class TestBypassOwner:
+    """Тесты флага bypass_owner (служебная учётка /api/svc).
+
+    Ключ и сервер принадлежат пользователю A (user_id=1),
+    действие выполняет пользователь B (user_id=2).
+    """
+
+    @patch("app.services.deployment_service.add_log")
+    @patch("app.services.deployment_service.db.session")
+    @patch("app.services.deployment_service.deploy_key_to_server")
+    @patch("app.services.deployment_service.decrypt_access_key")
+    @patch("app.services.deployment_service.ssh_connection")
+    @patch("app.services.deployment_service.KeyDeployment")
+    @patch("app.services.deployment_service.Server")
+    @patch("app.services.deployment_service.SSHKey")
+    def test_deploy_key_bypass_owner_success(
+        self,
+        mock_ssh_key_class,
+        mock_server_class,
+        mock_deployment_class,
+        mock_ssh_connection,
+        mock_decrypt,
+        mock_deploy,
+        mock_db_session,
+        mock_add_log,
+        mock_key,
+        mock_server,
+    ):
+        """
+        Раскатка на чужой сервер проходит с флагом bypass_owner=True.
+        Ключ и сервер принадлежат A (user_id=1), деплой выполняет B (user_id=2).
+        """
+        # Настраиваем моки
+        mock_ssh_key_class.query.get.return_value = mock_key  # user_id=1 (A)
+        mock_server_class.query.get.return_value = mock_server  # user_id=1 (A)
+        mock_deployment_class.query.filter_by.return_value.first.return_value = None
+        mock_decrypt.return_value = {
+            "success": True,
+            "private_key": "decrypted_private_key",
+        }
+        mock_deploy.return_value = {
+            "success": True,
+            "message": "Successfully deployed",
+        }
+
+        # Выполняем деплой от B с флагом
+        result = deploy_key_to_servers(
+            user_id=2,  # B
+            key_id=10,
+            server_ids=[100],
+            bypass_owner=True,
+        )
+
+        # Проверяем результат
+        assert result["success"] is True
+        assert result["success_count"] == 1
+        assert result["failed_count"] == 0
+        assert result["results"][0]["success"] is True
+
+    @patch("app.services.deployment_service.add_log")
+    @patch("app.services.deployment_service.db.session")
+    @patch("app.services.deployment_service.deploy_key_to_server")
+    @patch("app.services.deployment_service.decrypt_access_key")
+    @patch("app.services.deployment_service.ssh_connection")
+    @patch("app.services.deployment_service.KeyDeployment")
+    @patch("app.services.deployment_service.Server")
+    @patch("app.services.deployment_service.SSHKey")
+    def test_deploy_key_without_bypass_owner_denied(
+        self,
+        mock_ssh_key_class,
+        mock_server_class,
+        mock_deployment_class,
+        mock_ssh_connection,
+        mock_decrypt,
+        mock_deploy,
+        mock_db_session,
+        mock_add_log,
+        mock_key,
+        mock_server,
+    ):
+        """
+        Без флага тот же набор даёт access_denied — защита браузерного пути цела.
+        """
+        mock_ssh_key_class.query.get.return_value = mock_key  # user_id=1 (A)
+        mock_server_class.query.get.return_value = mock_server  # user_id=1 (A)
+        mock_deployment_class.query.filter_by.return_value.first.return_value = None
+        mock_decrypt.return_value = {
+            "success": True,
+            "private_key": "decrypted_private_key",
+        }
+        mock_deploy.return_value = {
+            "success": True,
+            "message": "Successfully deployed",
+        }
+
+        result = deploy_key_to_servers(
+            user_id=2,  # B
+            key_id=10,
+            server_ids=[100],
+        )
+
+        assert result["success"] is False
+        assert result["error_type"] == "access_denied"
+
+    @patch("app.services.deployment_service.add_log")
+    @patch("app.services.deployment_service.db.session")
+    @patch("app.services.deployment_service.revoke_key_from_server")
+    @patch("app.services.deployment_service.decrypt_access_key")
+    @patch("app.services.deployment_service.ssh_connection")
+    @patch("app.services.deployment_service.KeyDeployment")
+    @patch("app.services.deployment_service.Server")
+    @patch("app.services.deployment_service.SSHKey")
+    def test_revoke_by_ids_bypass_owner_chain(
+        self,
+        mock_ssh_key_class,
+        mock_server_class,
+        mock_deployment_class,
+        mock_ssh_connection,
+        mock_decrypt,
+        mock_revoke,
+        mock_db_session,
+        mock_add_log,
+        mock_key,
+        mock_server,
+        mock_deployment,
+    ):
+        """
+        Цепочка отзыва: revoke_key_from_server_by_ids с флагом на чужом ключе
+        доходит до конца и помечает раскатку отозванной.
+
+        Падает, если в ~428 не передать bypass_owner=bypass_owner:
+        тогда revoke_deployment_by_id вернёт access_denied на чужом ключе.
+        """
+        # Настраиваем моки
+        mock_ssh_key_class.query.get.return_value = mock_key  # user_id=1 (A)
+        mock_server_class.query.get.return_value = mock_server  # user_id=1 (A)
+        mock_deployment.ssh_key = mock_key
+        mock_deployment.server = mock_server
+        mock_deployment_class.query.filter_by.return_value.first.return_value = mock_deployment
+        mock_deployment_class.query.get.return_value = mock_deployment
+
+        mock_decrypt.return_value = {
+            "success": True,
+            "private_key": "decrypted_private_key",
+        }
+        mock_revoke.return_value = {
+            "success": True,
+            "message": "Key successfully revoked",
+        }
+
+        # Выполняем отзыв от B с флагом
+        result = revoke_key_from_server_by_ids(
+            user_id=2,  # B
+            key_id=10,
+            server_id=100,
+            bypass_owner=True,
+        )
+
+        # Проверяем результат
+        assert result["success"] is True
+        assert mock_deployment.revoked_at is not None
+        assert mock_deployment.revoked_by == 2
+
+    @patch("app.services.deployment_service.add_log")
+    @patch("app.services.deployment_service.db.session")
+    @patch("app.services.deployment_service.revoke_key_from_all_servers")
+    @patch("app.services.deployment_service.Server")
+    @patch("app.services.deployment_service.KeyDeployment")
+    @patch("app.services.deployment_service.SSHKey")
+    def test_revoke_globally_bypass_owner_success(
+        self,
+        mock_ssh_key_class,
+        mock_deployment_class,
+        mock_server_class,
+        mock_revoke_all,
+        mock_db_session,
+        mock_add_log,
+        mock_key,
+        mock_server,
+        mock_deployment,
+    ):
+        """
+        revoke_key_globally с флагом отзывает чужой ключ со всех серверов.
+        """
+        # Настраиваем моки
+        mock_ssh_key_class.query.get.return_value = mock_key  # user_id=1 (A)
+        mock_deployment_class.query.filter_by.return_value.all.return_value = [mock_deployment]
+        mock_server_class.query.get.return_value = mock_server
+
+        mock_revoke_all.return_value = {
+            "success": True,
+            "success_count": 1,
+            "failed_count": 0,
+            "results": [
+                {
+                    "success": True,
+                    "server_name": "test-server",
+                    "message": "Revoked successfully",
+                }
+            ],
+        }
+        mock_deployment_class.query.filter_by.return_value.first.return_value = mock_deployment
+
+        # Выполняем глобальный отзыв от B с флагом
+        result = revoke_key_globally(user_id=2, key_id=10, bypass_owner=True)
+
+        # Проверяем результат
+        assert result["success"] is True
+        assert result["completed"] == 1
+        assert mock_deployment.revoked_at is not None
+        assert mock_deployment.revoked_by == 2
+
+    @patch("app.services.deployment_service.add_log")
+    @patch("app.services.deployment_service.db.session")
+    @patch("app.services.deployment_service.revoke_key_from_all_servers")
+    @patch("app.services.deployment_service.Server")
+    @patch("app.services.deployment_service.KeyDeployment")
+    @patch("app.services.deployment_service.SSHKey")
+    def test_revoke_globally_without_bypass_owner_denied(
+        self,
+        mock_ssh_key_class,
+        mock_deployment_class,
+        mock_server_class,
+        mock_revoke_all,
+        mock_db_session,
+        mock_add_log,
+        mock_key,
+        mock_server,
+        mock_deployment,
+    ):
+        """
+        Без флага глобальный отзыв чужого ключа даёт access_denied.
+        """
+        mock_ssh_key_class.query.get.return_value = mock_key  # user_id=1 (A)
+        mock_deployment_class.query.filter_by.return_value.all.return_value = [mock_deployment]
+        mock_server_class.query.get.return_value = mock_server
+        mock_revoke_all.return_value = {
+            "success": True,
+            "success_count": 1,
+            "failed_count": 0,
+            "results": [],
+        }
+        mock_deployment_class.query.filter_by.return_value.first.return_value = mock_deployment
+
+        result = revoke_key_globally(user_id=2, key_id=10)
+
+        assert result["success"] is False
+        assert result["error_type"] == "access_denied"
