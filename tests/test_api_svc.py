@@ -739,3 +739,49 @@ def test_e10_access_is_logged(client, svc_user):
 
     log_entry = Log.query.filter_by(action="svc_get_private_key", target=str(key.id)).first()
     assert log_entry is not None
+
+
+# ---------------------------------------------------------------------------
+# E11 — приватный ключ в формате PuTTY (.ppk) по key_id
+# ---------------------------------------------------------------------------
+
+
+def test_e11_get_private_key_ppk_converts_decrypted_private_key(client, svc_user):
+    key, plaintext_pem = _make_svc_key(svc_user, fingerprint="fp-e11-own")
+
+    with patch("app.routes.api_svc.ssh_keys.convert_private_key_to_ppk") as mock_convert:
+        mock_convert.return_value = b"PuTTY-User-Key-File-3: ssh-rsa\n"
+
+        response = client.get(f"/api/svc/keys/{key.id}/private.ppk", headers=auth_headers())
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["private_key_ppk"].startswith("PuTTY-User-Key-File")
+    mock_convert.assert_called_once_with(plaintext_pem)
+
+
+def test_e11_foreign_key_returns_404_without_conversion(client, svc_user, other_user):
+    key, _ = _make_svc_key(other_user, fingerprint="fp-e11-foreign")
+
+    with patch("app.routes.api_svc.ssh_keys.convert_private_key_to_ppk") as mock_convert:
+        response = client.get(f"/api/svc/keys/{key.id}/private.ppk", headers=auth_headers())
+
+    assert response.status_code == 404
+    assert response.get_json()["success"] is False
+    mock_convert.assert_not_called()
+
+
+def test_e11_puttygen_unavailable_returns_500(client, svc_user):
+    key, _ = _make_svc_key(svc_user, fingerprint="fp-e11-puttygen")
+    error_message = "Утилита puttygen недоступна на сервере"
+
+    with patch("app.routes.api_svc.ssh_keys.convert_private_key_to_ppk") as mock_convert:
+        mock_convert.side_effect = RuntimeError(error_message)
+
+        response = client.get(f"/api/svc/keys/{key.id}/private.ppk", headers=auth_headers())
+
+    assert response.status_code == 500
+    data = response.get_json()
+    assert data["success"] is False
+    assert error_message in data["message"]

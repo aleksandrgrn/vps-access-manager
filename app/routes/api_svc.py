@@ -360,3 +360,35 @@ def get_private_key(key_id: int) -> Tuple[Dict[str, Any], int]:
         return jsonify({"success": False, "message": decrypt_result["message"]}), 500
 
     return jsonify({"success": True, "private_key": decrypt_result["private_key"]}), 200
+
+
+# ---------------------------------------------------------------------------
+# E11 — приватный ключ в формате PuTTY (.ppk) по key_id
+# ---------------------------------------------------------------------------
+@bp.route("/keys/<int:key_id>/private.ppk", methods=["GET"])
+@login_required
+def get_private_key_ppk(key_id: int) -> Tuple[Dict[str, Any], int]:
+    # Как и в E10: каждое обращение в журнал — это выдача секрета наружу.
+    add_log(
+        "svc_get_private_key_ppk",
+        target=str(key_id),
+        details={"key_id": key_id, "format": "ppk"},
+    )
+
+    # Только ключи служебной учётки: чужой ключ — тот же 404, что и несуществующий.
+    key = SSHKey.query.filter_by(id=key_id, user_id=current_user.id).first()
+    if not key:
+        return jsonify({"success": False, "message": "Ключ не найден"}), 404
+
+    decrypt_result = decrypt_access_key(key)
+    if not decrypt_result["success"]:
+        return jsonify({"success": False, "message": decrypt_result["message"]}), 500
+
+    # Единственное место в этом маршруте, где нужен try: конвертер бросает
+    # RuntimeError, когда puttygen недоступен или вернул ошибку.
+    try:
+        ppk_bytes = ssh_keys.convert_private_key_to_ppk(decrypt_result["private_key"])
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+    return jsonify({"success": True, "private_key_ppk": ppk_bytes.decode("utf-8")}), 200
