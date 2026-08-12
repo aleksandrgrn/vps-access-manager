@@ -23,6 +23,7 @@ from app.services import deployment_service
 from app.services.key_service import decrypt_access_key
 from app.services.ssh import keys as ssh_keys
 from app.services.ssh.server_manager import test_connection
+from app.utils import add_log
 
 bp = Blueprint("api_svc", __name__)
 logger = logging.getLogger(__name__)
@@ -336,3 +337,26 @@ def list_key_deployments() -> Tuple[Dict[str, Any], int]:
         ),
         200,
     )
+
+
+# ---------------------------------------------------------------------------
+# E10 — приватный ключ по key_id (только ключи svc-аккаунта!)
+# ---------------------------------------------------------------------------
+@bp.route("/keys/<int:key_id>/private", methods=["GET"])
+@login_required
+def get_private_key(key_id: int) -> Tuple[Dict[str, Any], int]:
+    # Каждое обращение — в журнал: после E10 приватные ключи впервые достаются
+    # через /api/svc, цена компрометации служебного токена растёт.
+    add_log("svc_get_private_key", target=str(key_id), details={"key_id": key_id})
+
+    # Только ключи, принадлежащие служебной учётке: чужой ключ — тот же 404,
+    # что и несуществующий. bypass_owner сюда не переносим — это выдача секрета.
+    key = SSHKey.query.filter_by(id=key_id, user_id=current_user.id).first()
+    if not key:
+        return jsonify({"success": False, "message": "Ключ не найден"}), 404
+
+    decrypt_result = decrypt_access_key(key)
+    if not decrypt_result["success"]:
+        return jsonify({"success": False, "message": decrypt_result["message"]}), 500
+
+    return jsonify({"success": True, "private_key": decrypt_result["private_key"]}), 200

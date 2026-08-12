@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from app import create_app, db
-from app.models import KeyDeployment, Server, ServerCategory, SSHKey, User
+from app.models import KeyDeployment, Log, Server, ServerCategory, SSHKey, User
 
 SERVICE_TOKEN = "test-service-token-abc123"
 
@@ -666,3 +666,76 @@ def test_post_svc_bypasses_csrf_protection(monkeypatch):
 
         db.session.remove()
         db.drop_all()
+
+
+# ---------------------------------------------------------------------------
+# E10 — приватный ключ по key_id (только ключи svc-аккаунта)
+# ---------------------------------------------------------------------------
+
+
+def _make_svc_key(user, fingerprint, plaintext_pem=None, name="k"):
+    """Создаёт SSHKey под заданным пользователем с зашифрованным приватным PEM."""
+    from app.services.ssh import keys as ssh_keys_service
+
+    encryption_key = __import__("os").environ["ENCRYPTION_KEY"]
+    if plaintext_pem is None:
+        plaintext_pem = (
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQ\n"
+            "-----END OPENSSH PRIVATE KEY-----"
+        )
+    encrypted = ssh_keys_service.encrypt_private_key(plaintext_pem, encryption_key)
+    key = SSHKey(
+        name=name,
+        public_key="ssh-rsa AAAA...",
+        private_key_encrypted=encrypted,
+        fingerprint=fingerprint,
+        key_type="rsa",
+        user_id=user.id,
+    )
+    db.session.add(key)
+    db.session.commit()
+    return key, plaintext_pem
+
+
+def test_e10_get_private_key_returns_decrypted_private_key(client, svc_user):
+    key, plaintext_pem = _make_svc_key(svc_user, fingerprint="fp-e10-own")
+
+    response = client.get(f"/api/svc/keys/{key.id}/private", headers=auth_headers())
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["success"] is True
+    assert data["private_key"] == plaintext_pem
+
+
+def test_e10_foreign_key_returns_404(client, svc_user, other_user):
+    """Чужой ключ (владелец — другой пользователь) — 404, private_key ни в каком виде."""
+    key, _ = _make_svc_key(other_user, fingerprint="fp-e10-foreign")
+
+    response = client.get(f"/api/svc/keys/{key.id}/private", headers=auth_headers())
+
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["success"] is False
+    assert "private_key" not in data
+
+
+def test_e10_nonexistent_key_returns_404(client, svc_user):
+    response = client.get("/api/svc/keys/999999/private", headers=auth_headers())
+
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["success"] is False
+    assert "private_key" not in data
+
+
+def test_e10_access_is_logged(client, svc_user):
+    """Каждое обращение к E10 обязано попасть в журнал (add_log, с key_id)."""
+    key, _ = _make_svc_key(svc_user, fingerprint="fp-e10-log")
+
+    response = client.get(f"/api/svc/keys/{key.id}/private", headers=auth_headers())
+    assert response.status_code == 200
+
+    log_entry = Log.query.filter_by(action="svc_get_private_key", target=str(key.id)).first()
+    assert log_entry is not None
