@@ -253,3 +253,37 @@ class TestBootstrapServerAccess:
             "/tmp/sshd_config.backup.2" in call.args[0]
             for call in password_connection.execute.call_args_list
         )
+
+
+class TestDeployRootPublicKey:
+    """Прямой юнит-тест _deploy_root_public_key: команда дозаписи ключа
+    должна гарантировать перевод строки перед ключом (см. FIX-C-VPSM)."""
+
+    @patch("app.services.ssh.bootstrap.validate_ssh_public_key", return_value=True)
+    def test_append_command_has_leading_and_trailing_newline(
+        self, _mock_validate_key, valid_public_key
+    ):
+        from app.services.ssh.bootstrap import _deploy_root_public_key
+
+        executor = MagicMock()
+        executor.side_effect = [
+            (True, "", ""),  # mkdir -p /root/.ssh && chmod 700
+            (True, "", ""),  # cat authorized_keys (пустой файл)
+            (True, "", ""),  # printf >> authorized_keys
+        ]
+
+        result = _deploy_root_public_key(
+            executor=executor, public_key=valid_public_key, server_name="srv"
+        )
+
+        assert result["success"] is True
+        assert result["status"] == "deployed"
+
+        append_command = executor.call_args_list[2].args[0]
+        stripped = valid_public_key.strip()
+        # Ведущий \n обязателен: без него ключ прилипнет к последней строке
+        # существующего файла и сломает оба ключа.
+        assert append_command.startswith("printf '\\n%s\\n'")
+        # Ключ уходит аргументом (не частью формата) — % внутри ключа безопасен.
+        assert f"'{stripped}'" in append_command
+        assert ">> /root/.ssh/authorized_keys" in append_command

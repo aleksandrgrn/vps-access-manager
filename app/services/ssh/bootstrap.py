@@ -258,7 +258,7 @@ def _deploy_root_public_key(
     escaped_key = public_key.strip().replace("'", "'\\''")
     append_success, _, append_stderr = executor(
         (
-            f"echo '{escaped_key}' >> /root/.ssh/authorized_keys && "
+            f"printf '\\n%s\\n' '{escaped_key}' >> /root/.ssh/authorized_keys && "
             "chmod 600 /root/.ssh/authorized_keys"
         ),
         20,
